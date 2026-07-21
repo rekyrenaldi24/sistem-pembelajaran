@@ -442,17 +442,26 @@ function NilaiAkhirTab({ profile, classes, activeClassId, setActiveClassId, stud
 
   const rows = useMemo(() => students.map((s) => {
     const attRows = attendance.filter((a) => a.student_id === s.id);
-    const attPct = attRows.length ? Math.round((attRows.filter((a) => a.status === "Hadir").length / attRows.length) * 100) : 0;
+    const hadir = attRows.filter((a) => a.status === "Hadir").length;
+    const izin = attRows.filter((a) => a.status === "Izin").length;
+    const sakit = attRows.filter((a) => a.status === "Sakit").length;
+    const alpa = attRows.filter((a) => a.status === "Alpa").length;
+    const totalSesi = attRows.length;
+    const tidakMasuk = izin + sakit + alpa;
+    const attPct = totalSesi ? Math.round((hadir / totalSesi) * 100) : 0;
     const pracVals = practice.filter((p) => p.student_id === s.id).map((p) => p.score);
     const avgPrac = pracVals.length ? Math.round((pracVals.reduce((a, b) => a + b, 0) / pracVals.length) * 10) / 10 : 0;
     const exam = exams[s.id] || 0;
     const netPoints = points.filter((p) => p.student_id === s.id).reduce((sum, p) => sum + (p.type === "plus" ? 1 : -1), 0);
     const final = computeFinalScore({ attendancePct: attPct, avgPractice: avgPrac, examScore: exam, netPoints, weights });
-    return { id: s.id, name: s.name, attPct, avgPrac, exam, netPoints, final };
+    return { id: s.id, name: s.name, hadir, izin, sakit, alpa, totalSesi, tidakMasuk, attPct, avgPrac, exam, netPoints, final };
   }), [students, attendance, practice, exams, points, weights]);
 
   const handleExport = () => {
-    const rekapAbsensi = rows.map((r) => ({ Nama: r.name, "Kehadiran (%)": r.attPct }));
+    const rekapAbsensi = rows.map((r) => ({
+      Nama: r.name, Hadir: r.hadir, Izin: r.izin, Sakit: r.sakit, Alpa: r.alpa,
+      "Total Tidak Masuk": r.tidakMasuk, "Total Pertemuan": r.totalSesi, "Kehadiran (%)": r.attPct,
+    }));
     const rekapNilai = rows.map((r) => ({
       Nama: r.name, "Kehadiran (%)": r.attPct, "Rata Praktek Harian": r.avgPrac,
       "Ujian Akhir": r.exam, "Poin Bersih": r.netPoints, "Nilai Akhir": r.final, Predikat: gradeLetter(r.final),
@@ -490,6 +499,44 @@ function NilaiAkhirTab({ profile, classes, activeClassId, setActiveClassId, stud
               </div>
             ))}
             <button onClick={() => saveWeights(weights)} className="self-end px-3.5 py-2 rounded-lg text-sm font-semibold text-white" style={{ background: NAVY }}>Simpan Bobot</button>
+          </div>
+        )}
+      </Card>
+
+      <Card className="mb-5" style={{ padding: 0 }}>
+        <div className="px-5 pt-4 pb-2 text-sm font-bold" style={{ color: INK }}>Rekap Absensi</div>
+        {students.length === 0 ? <div className="px-5 pb-5"><EmptyState icon={CalendarCheck} text="Belum ada siswa di kelas ini." /></div> : loading ? (
+          <div className="px-5 pb-5 text-sm" style={{ color: MUTED }}>Memuat…</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm" style={{ borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ color: MUTED }}>
+                  <th className="text-left font-semibold px-5 py-2.5 whitespace-nowrap">Siswa</th>
+                  <th className="text-center font-semibold px-3 py-2.5 whitespace-nowrap">Hadir</th>
+                  <th className="text-center font-semibold px-3 py-2.5 whitespace-nowrap">Izin</th>
+                  <th className="text-center font-semibold px-3 py-2.5 whitespace-nowrap">Sakit</th>
+                  <th className="text-center font-semibold px-3 py-2.5 whitespace-nowrap">Alpa</th>
+                  <th className="text-center font-semibold px-3 py-2.5 whitespace-nowrap">Total Tidak Masuk</th>
+                  <th className="text-center font-semibold px-3 py-2.5 whitespace-nowrap">Total Pertemuan</th>
+                  <th className="text-center font-semibold px-3 py-2.5 whitespace-nowrap">% Kehadiran</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r, i) => (
+                  <tr key={r.id} style={{ background: i % 2 === 0 ? "white" : BG }}>
+                    <td className="px-5 py-2 font-medium" style={{ color: INK }}>{r.name}</td>
+                    <td className="text-center px-3 py-2" style={{ color: GREEN, fontWeight: 700 }}>{r.hadir}</td>
+                    <td className="text-center px-3 py-2" style={{ color: "#B8760F" }}>{r.izin}</td>
+                    <td className="text-center px-3 py-2" style={{ color: "#3E5C94" }}>{r.sakit}</td>
+                    <td className="text-center px-3 py-2" style={{ color: RED, fontWeight: 700 }}>{r.alpa}</td>
+                    <td className="text-center px-3 py-2" style={{ color: MUTED }}>{r.tidakMasuk}</td>
+                    <td className="text-center px-3 py-2" style={{ color: MUTED }}>{r.totalSesi}</td>
+                    <td className="text-center px-3 py-2 font-bold" style={{ color: INK }}>{r.attPct}%</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </Card>
