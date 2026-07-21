@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { supabase } from "./supabaseClient.js";
 import {
   NAVY, NAVY2, ORANGE, BG, INK, MUTED, GREEN, RED, AMBER,
@@ -101,6 +101,8 @@ export default function WaliKelasApp({ profile, onLogout }) {
 function AbsensiTab({ profile, classes, activeClassId, setActiveClassId, students, notify, activeClass }) {
   const [date, setDate] = useState(todayStr());
   const [record, setRecord] = useState({});
+  const [allRecords, setAllRecords] = useState([]);
+  const [loadingRecap, setLoadingRecap] = useState(true);
 
   useEffect(() => {
     if (!students.length) { setRecord({}); return; }
@@ -112,6 +114,17 @@ function AbsensiTab({ profile, classes, activeClassId, setActiveClassId, student
       });
   }, [activeClassId, date, students, profile.id]);
 
+  const loadRecap = useCallback(async () => {
+    if (!students.length) { setAllRecords([]); setLoadingRecap(false); return; }
+    setLoadingRecap(true);
+    const { data } = await supabase.from("homeroom_attendance").select("student_id,status").eq("wali_kelas_id", profile.id)
+      .in("student_id", students.map((s) => s.id));
+    setAllRecords(data || []);
+    setLoadingRecap(false);
+  }, [students, profile.id]);
+
+  useEffect(() => { loadRecap(); }, [loadRecap, record]);
+
   const setStatus = async (studentId, status) => {
     setRecord((r) => ({ ...r, [studentId]: status }));
     const { error } = await supabase.from("homeroom_attendance").upsert(
@@ -119,6 +132,7 @@ function AbsensiTab({ profile, classes, activeClassId, setActiveClassId, student
       { onConflict: "student_id,date" }
     );
     if (error) notify("Gagal: " + error.message);
+    loadRecap();
   };
   const markAll = async (status) => {
     const rows = students.map((s) => ({ student_id: s.id, wali_kelas_id: profile.id, date, status }));
@@ -126,13 +140,32 @@ function AbsensiTab({ profile, classes, activeClassId, setActiveClassId, student
     if (error) return notify("Gagal: " + error.message);
     const rec = {}; students.forEach((s) => { rec[s.id] = status; });
     setRecord(rec);
+    loadRecap();
   };
 
+  const recapRows = useMemo(() => students.map((s) => {
+    const rs = allRecords.filter((a) => a.student_id === s.id);
+    const hadir = rs.filter((a) => a.status === "Hadir").length;
+    const izin = rs.filter((a) => a.status === "Izin").length;
+    const sakit = rs.filter((a) => a.status === "Sakit").length;
+    const alpa = rs.filter((a) => a.status === "Alpa").length;
+    const total = rs.length;
+    const tidakMasuk = izin + sakit + alpa;
+    const pct = total ? Math.round((hadir / total) * 100) : 0;
+    return { id: s.id, name: s.name, hadir, izin, sakit, alpa, total, tidakMasuk, pct };
+  }), [students, allRecords]);
+
   const handleExport = async () => {
-    const { data } = await supabase.from("homeroom_attendance").select("student_id,date,status").eq("wali_kelas_id", profile.id).in("student_id", students.map((s) => s.id));
     const nameOf = (id) => students.find((s) => s.id === id)?.name || "—";
-    const rows = (data || []).map((r) => ({ Nama: nameOf(r.student_id), Tanggal: r.date, Status: r.status }));
-    exportToExcel([{ name: "Rekap Absensi Kelas", rows }], `Absensi_${activeClass?.name || ""}_${todayStr()}.xlsx`);
+    const rekapPerSiswa = recapRows.map((r) => ({
+      Nama: r.name, Hadir: r.hadir, Izin: r.izin, Sakit: r.sakit, Alpa: r.alpa,
+      "Total Tidak Masuk": r.tidakMasuk, "Total Pertemuan": r.total, "Kehadiran (%)": r.pct,
+    }));
+    const riwayat = allRecords.map((r) => ({ Nama: nameOf(r.student_id), Status: r.status }));
+    exportToExcel(
+      [{ name: "Rekap per Siswa", rows: rekapPerSiswa }, { name: "Riwayat Lengkap", rows: riwayat }],
+      `Absensi_${activeClass?.name || ""}_${todayStr()}.xlsx`
+    );
   };
 
   const summary = ATT_STATUSES.map((st) => ({ ...st, count: students.filter((s) => record[s.id] === st.key).length }));
@@ -140,7 +173,7 @@ function AbsensiTab({ profile, classes, activeClassId, setActiveClassId, student
   return (
     <div>
       <PageHeader eyebrow="Wali Kelas" title="Absensi Kelas" right={<ClassPicker classes={classes} value={activeClassId} onChange={setActiveClassId} />} />
-      <Card>
+      <Card className="mb-5">
         <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
           <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="text-sm px-3 py-2 rounded-lg font-semibold" style={{ background: BG, color: INK }} />
           <div className="flex gap-2 flex-wrap items-center">
@@ -180,6 +213,44 @@ function AbsensiTab({ profile, classes, activeClassId, setActiveClassId, student
                 </div>
               </div>
             ))}
+          </div>
+        )}
+      </Card>
+
+      <Card style={{ padding: 0 }}>
+        <div className="px-5 pt-4 pb-2 text-sm font-bold" style={{ color: INK }}>Rekap Absensi Keseluruhan</div>
+        {students.length === 0 ? <div className="px-5 pb-5"><EmptyState icon={CalendarCheck} text="Belum ada siswa di kelas ini." /></div> : loadingRecap ? (
+          <div className="px-5 pb-5 text-sm" style={{ color: MUTED }}>Memuat…</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm" style={{ borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ color: MUTED }}>
+                  <th className="text-left font-semibold px-5 py-2.5 whitespace-nowrap">Siswa</th>
+                  <th className="text-center font-semibold px-3 py-2.5 whitespace-nowrap">Hadir</th>
+                  <th className="text-center font-semibold px-3 py-2.5 whitespace-nowrap">Izin</th>
+                  <th className="text-center font-semibold px-3 py-2.5 whitespace-nowrap">Sakit</th>
+                  <th className="text-center font-semibold px-3 py-2.5 whitespace-nowrap">Alpa</th>
+                  <th className="text-center font-semibold px-3 py-2.5 whitespace-nowrap">Total Tidak Masuk</th>
+                  <th className="text-center font-semibold px-3 py-2.5 whitespace-nowrap">Total Pertemuan</th>
+                  <th className="text-center font-semibold px-3 py-2.5 whitespace-nowrap">% Kehadiran</th>
+                </tr>
+              </thead>
+              <tbody>
+                {recapRows.map((r, i) => (
+                  <tr key={r.id} style={{ background: i % 2 === 0 ? "white" : BG }}>
+                    <td className="px-5 py-2 font-medium" style={{ color: INK }}>{r.name}</td>
+                    <td className="text-center px-3 py-2" style={{ color: GREEN, fontWeight: 700 }}>{r.hadir}</td>
+                    <td className="text-center px-3 py-2" style={{ color: "#B8760F" }}>{r.izin}</td>
+                    <td className="text-center px-3 py-2" style={{ color: "#3E5C94" }}>{r.sakit}</td>
+                    <td className="text-center px-3 py-2" style={{ color: RED, fontWeight: 700 }}>{r.alpa}</td>
+                    <td className="text-center px-3 py-2" style={{ color: MUTED }}>{r.tidakMasuk}</td>
+                    <td className="text-center px-3 py-2" style={{ color: MUTED }}>{r.total}</td>
+                    <td className="text-center px-3 py-2 font-bold" style={{ color: INK }}>{r.pct}%</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </Card>
