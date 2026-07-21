@@ -278,6 +278,7 @@ function PoinTab({ profile, classes, activeClassId, setActiveClassId, students, 
 // ================= NILAI PRAKTEK HARIAN =================
 function PraktekTab({ profile, classes, activeClassId, setActiveClassId, students, notify }) {
   const [date, setDate] = useState(todayStr());
+  const [materi, setMateri] = useState("");
   const [scores, setScores] = useState({});
   const [entries, setEntries] = useState([]);
 
@@ -295,10 +296,11 @@ function PraktekTab({ profile, classes, activeClassId, setActiveClassId, student
     if (val === undefined || val === "") return;
     const { error } = await supabase.from("practice_scores").insert({
       student_id: studentId, guru_id: profile.id, subject: profile.subject, date, score: Number(val),
+      note: materi.trim() || null,
     });
     if (error) return notify("Gagal: " + error.message);
     setScores((s) => ({ ...s, [studentId]: "" }));
-    loadEntries(); notify("Nilai praktek tersimpan.");
+    loadEntries(); notify("Nilai tersimpan.");
   };
   const removeEntry = async (id) => { await supabase.from("practice_scores").delete().eq("id", id); loadEntries(); };
 
@@ -313,9 +315,12 @@ function PraktekTab({ profile, classes, activeClassId, setActiveClassId, student
     <div>
       <PageHeader eyebrow={`Mapel ${profile.subject}`} title="Nilai Praktek Harian" right={<ClassPicker classes={classes} value={activeClassId} onChange={setActiveClassId} />} />
       <Card className="mb-5">
-        <div className="flex items-center gap-2 mb-4">
-          <span className="text-sm font-bold" style={{ color: INK }}>Input nilai tanggal:</span>
+        <div className="flex items-center gap-2 mb-4 flex-wrap">
+          <span className="text-sm font-bold" style={{ color: INK }}>Tanggal:</span>
           <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="text-sm px-3 py-2 rounded-lg font-semibold" style={{ background: BG, color: INK }} />
+          <span className="text-sm font-bold ml-2" style={{ color: INK }}>Materi Ujian:</span>
+          <input value={materi} onChange={(e) => setMateri(e.target.value)} placeholder="mis. Lari 100m, Passing bola voli"
+            className="text-sm px-3 py-2 rounded-lg flex-1 min-w-[220px]" style={{ background: BG, color: INK }} />
         </div>
         {students.length === 0 ? <EmptyState icon={Users} text="Belum ada siswa di kelas ini." /> : (
           <div className="flex flex-col divide-y" style={{ borderColor: "#EEF0F3" }}>
@@ -337,12 +342,15 @@ function PraktekTab({ profile, classes, activeClassId, setActiveClassId, student
       </Card>
       <Card>
         <div className="text-sm font-bold mb-3" style={{ color: INK }}>Riwayat Entri</div>
-        {entries.length === 0 ? <EmptyState icon={ClipboardList} text="Belum ada entri nilai praktek." /> : (
+        {entries.length === 0 ? <EmptyState icon={ClipboardList} text="Belum ada entri nilai." /> : (
           <div className="flex flex-col divide-y max-h-[320px] overflow-y-auto" style={{ borderColor: "#EEF0F3" }}>
             {entries.map((e) => (
-              <div key={e.id} className="flex items-center justify-between py-2 text-sm">
-                <span style={{ color: INK }}>{studentName(e.student_id)} — {e.score}</span>
-                <div className="flex items-center gap-2">
+              <div key={e.id} className="flex items-center justify-between py-2 text-sm gap-2">
+                <div className="min-w-0">
+                  <div style={{ color: INK }}>{studentName(e.student_id)} — {e.score}</div>
+                  {e.note && <div className="text-xs" style={{ color: MUTED }}>Materi: {e.note}</div>}
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
                   <span className="text-xs" style={{ color: MUTED }}>{e.date}</span>
                   <button onClick={() => removeEntry(e.id)} className="w-6 h-6 rounded-md flex items-center justify-center" style={{ background: BG }}><Trash2 size={11} color={MUTED} /></button>
                 </div>
