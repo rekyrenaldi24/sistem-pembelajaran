@@ -330,6 +330,8 @@ function TabunganTab({ profile, classes, activeClassId, setActiveClassId, studen
   const [amount, setAmount] = useState("");
   const [note, setNote] = useState("");
   const [log, setLog] = useState([]);
+  const [gridMonth, setGridMonth] = useState(todayStr().slice(0, 7)); // "YYYY-MM"
+  const [expanded, setExpanded] = useState({}); // { [studentId]: true/false }
 
   useEffect(() => { setStudentId(students[0]?.id || ""); }, [students]);
 
@@ -351,6 +353,7 @@ function TabunganTab({ profile, classes, activeClassId, setActiveClassId, studen
     setAmount(""); setNote(""); loadLog(); notify("Transaksi tersimpan.");
   };
   const removeEntry = async (id) => { await supabase.from("savings").delete().eq("id", id); loadLog(); };
+  const toggleExpand = (id) => setExpanded((e) => ({ ...e, [id]: !e[id] }));
 
   const saldo = (id) => log.filter((s) => s.student_id === id).reduce((sum, s) => sum + (s.type === "setor" ? Number(s.amount) : -Number(s.amount)), 0);
   const studentName = (id) => students.find((s) => s.id === id)?.name || "—";
@@ -360,6 +363,22 @@ function TabunganTab({ profile, classes, activeClassId, setActiveClassId, studen
   const totalSetor = useMemo(() => log.filter((s) => s.type === "setor").reduce((sum, s) => sum + Number(s.amount), 0), [log]);
   const totalTarik = useMemo(() => log.filter((s) => s.type === "tarik").reduce((sum, s) => sum + Number(s.amount), 0), [log]);
 
+  const daysInMonth = useMemo(() => {
+    const [y, m] = gridMonth.split("-").map(Number);
+    return new Date(y, m, 0).getDate();
+  }, [gridMonth]);
+  const dayList = useMemo(() => Array.from({ length: daysInMonth }, (_, i) => i + 1), [daysInMonth]);
+  const paidSet = useMemo(() => {
+    const set = new Set();
+    log.forEach((l) => {
+      if (l.type === "setor" && l.date.startsWith(gridMonth)) {
+        const day = Number(l.date.slice(8, 10));
+        set.add(`${l.student_id}|${day}`);
+      }
+    });
+    return set;
+  }, [log, gridMonth]);
+
   const handleExport = () => {
     const rows = log.map((s) => ({
       Nama: studentName(s.student_id), Tanggal: s.date, Jenis: s.type === "setor" ? "Setor" : "Tarik",
@@ -367,8 +386,17 @@ function TabunganTab({ profile, classes, activeClassId, setActiveClassId, studen
     }));
     const saldoRows = students.map((s) => ({ Nama: s.name, "Saldo Saat Ini": saldo(s.id) }));
     saldoRows.push({ Nama: "TOTAL KELAS", "Saldo Saat Ini": totalKelas });
+    const gridRows = students.map((s, i) => {
+      const row = { NO: i + 1, "NAMA SISWA": s.name };
+      dayList.forEach((d) => { row[d] = paidSet.has(`${s.id}|${d}`) ? "✓" : ""; });
+      return row;
+    });
     exportToExcel(
-      [{ name: "Saldo Tabungan", rows: saldoRows }, { name: "Riwayat Transaksi", rows }],
+      [
+        { name: "Saldo Tabungan", rows: saldoRows },
+        { name: `Grid ${gridMonth}`, rows: gridRows },
+        { name: "Riwayat Transaksi", rows },
+      ],
       `Tabungan_${activeClass?.name || ""}_${todayStr()}.xlsx`
     );
   };
@@ -417,80 +445,110 @@ function TabunganTab({ profile, classes, activeClassId, setActiveClassId, studen
         </div>
       </Card>
 
-      <Card className="mb-5">
-        <div className="text-sm font-bold mb-3" style={{ color: INK }}>Saldo per Siswa</div>
-        {students.length === 0 ? <EmptyState icon={Wallet} text="Belum ada siswa." /> : (
+      <Card className="mb-5" style={{ padding: 0 }}>
+        <div className="px-5 pt-4 pb-3 flex items-center justify-between flex-wrap gap-2">
+          <div className="text-sm font-bold" style={{ color: INK }}>Grid Setoran Bulanan</div>
+          <input type="month" value={gridMonth} onChange={(e) => setGridMonth(e.target.value)}
+            className="text-sm px-3 py-2 rounded-lg font-semibold" style={{ background: BG, color: INK }} />
+        </div>
+        {students.length === 0 ? <div className="px-5 pb-5"><EmptyState icon={PiggyBank} text="Belum ada siswa." /></div> : (
+          <div className="overflow-x-auto pb-2">
+            <table className="text-sm" style={{ borderCollapse: "collapse" }}>
+              <thead>
+                <tr>
+                  <th className="text-center font-semibold px-2 py-2 sticky left-0" style={{ background: BG, color: MUTED, minWidth: 34 }}>No</th>
+                  <th className="text-left font-semibold px-3 py-2 sticky left-0" style={{ background: BG, color: MUTED, minWidth: 150, left: 34 }}>Nama Siswa</th>
+                  {dayList.map((d) => (
+                    <th key={d} className="text-center font-semibold px-1.5 py-2" style={{ color: MUTED, minWidth: 26 }}>{d}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {students.map((s, i) => (
+                  <tr key={s.id} style={{ background: i % 2 === 0 ? "white" : BG }}>
+                    <td className="text-center px-2 py-1.5 sticky left-0" style={{ background: i % 2 === 0 ? "white" : BG, color: MUTED }}>{i + 1}</td>
+                    <td className="text-left px-3 py-1.5 sticky left-0 whitespace-nowrap" style={{ background: i % 2 === 0 ? "white" : BG, color: INK, left: 34 }}>{s.name}</td>
+                    {dayList.map((d) => (
+                      <td key={d} className="text-center px-1.5 py-1.5" style={{ color: GREEN, fontWeight: 700, borderLeft: "1px solid #EEF0F3" }}>
+                        {paidSet.has(`${s.id}|${d}`) ? "✓" : ""}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+
+      <Card style={{ padding: 0 }}>
+        <div className="px-5 pt-4 pb-2 text-sm font-bold" style={{ color: INK }}>Riwayat Pembayaran per Siswa</div>
+        <div className="px-5 pb-1 text-xs" style={{ color: MUTED }}>Klik nama siswa untuk lihat riwayat lengkap.</div>
+        {students.length === 0 ? <div className="px-5 pb-5"><EmptyState icon={PiggyBank} text="Belum ada siswa." /></div> : (
           <div className="flex flex-col divide-y" style={{ borderColor: "#EEF0F3" }}>
-            {students.map((s) => (
-              <div key={s.id} className="flex items-center justify-between py-2.5">
-                <span className="text-sm font-medium" style={{ color: INK }}>{s.name}</span>
-                <span className="text-sm font-bold" style={{ color: NAVY }}>{rupiah(saldo(s.id))}</span>
-              </div>
-            ))}
-            <div className="flex items-center justify-between py-2.5">
+            {students.map((s) => {
+              const rows = log.filter((l) => l.student_id === s.id);
+              const isOpen = !!expanded[s.id];
+              return (
+                <div key={s.id}>
+                  <button onClick={() => toggleExpand(s.id)} className="w-full flex items-center justify-between px-5 py-3 text-left">
+                    <div className="flex items-center gap-2">
+                      <span style={{ color: MUTED, fontSize: 11, width: 12, display: "inline-block" }}>{isOpen ? "▾" : "▸"}</span>
+                      <span className="text-sm font-semibold" style={{ color: INK }}>{s.name}</span>
+                      <span className="text-xs" style={{ color: MUTED }}>({rows.length} transaksi)</span>
+                    </div>
+                    <span className="text-sm font-bold" style={{ color: NAVY }}>{rupiah(saldo(s.id))}</span>
+                  </button>
+                  {isOpen && (
+                    rows.length === 0 ? (
+                      <div className="px-5 pb-4 text-xs" style={{ color: MUTED }}>Belum ada transaksi.</div>
+                    ) : (
+                      <div className="overflow-x-auto pb-3">
+                        <table className="w-full text-sm" style={{ borderCollapse: "collapse" }}>
+                          <thead>
+                            <tr style={{ color: MUTED }}>
+                              <th className="text-left font-semibold px-5 py-2 whitespace-nowrap">Tanggal</th>
+                              <th className="text-left font-semibold px-3 py-2 whitespace-nowrap">Jenis</th>
+                              <th className="text-left font-semibold px-3 py-2 whitespace-nowrap">Kategori</th>
+                              <th className="text-left font-semibold px-3 py-2 whitespace-nowrap">Catatan</th>
+                              <th className="text-right font-semibold px-3 py-2 whitespace-nowrap">Jumlah</th>
+                              <th className="px-3 py-2"></th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {rows.map((r, i) => (
+                              <tr key={r.id} style={{ background: i % 2 === 0 ? "white" : BG }}>
+                                <td className="px-5 py-2" style={{ color: INK }}>{r.date}</td>
+                                <td className="px-3 py-2" style={{ color: r.type === "setor" ? GREEN : RED, fontWeight: 600 }}>{r.type === "setor" ? "Setor" : "Tarik"}</td>
+                                <td className="px-3 py-2" style={{ color: MUTED }}>{r.category}</td>
+                                <td className="px-3 py-2" style={{ color: MUTED }}>{r.note || "—"}</td>
+                                <td className="text-right px-3 py-2 font-semibold" style={{ color: r.type === "setor" ? GREEN : RED }}>
+                                  {r.type === "setor" ? "+" : "-"}{rupiah(r.amount)}
+                                </td>
+                                <td className="text-right px-3 py-2">
+                                  <button onClick={() => removeEntry(r.id)} className="w-6 h-6 rounded-md flex items-center justify-center ml-auto" style={{ background: BG }}><Trash2 size={11} color={MUTED} /></button>
+                                </td>
+                              </tr>
+                            ))}
+                            <tr style={{ background: NAVY + "0D" }}>
+                              <td colSpan={4} className="px-5 py-2.5 font-bold text-right" style={{ color: NAVY }}>Total Tabungan</td>
+                              <td className="text-right px-3 py-2.5 font-bold" style={{ color: NAVY }} colSpan={2}>{rupiah(saldo(s.id))}</td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    )
+                  )}
+                </div>
+              );
+            })}
+            <div className="flex items-center justify-between px-5 py-3">
               <span className="text-sm font-bold" style={{ color: INK }}>Total Kelas</span>
               <span className="text-sm font-bold" style={{ color: NAVY }}>{rupiah(totalKelas)}</span>
             </div>
           </div>
         )}
       </Card>
-
-      <div className="text-sm font-bold mb-3" style={{ color: INK }}>Riwayat Pembayaran per Siswa</div>
-      {students.length === 0 ? (
-        <Card><EmptyState icon={PiggyBank} text="Belum ada siswa." /></Card>
-      ) : (
-        <div className="flex flex-col gap-4">
-          {students.map((s) => {
-            const rows = log.filter((l) => l.student_id === s.id);
-            return (
-              <Card key={s.id} style={{ padding: 0 }}>
-                <div className="px-5 pt-4 pb-2 flex items-center justify-between">
-                  <span className="text-sm font-bold" style={{ color: INK }}>{s.name}</span>
-                  <span className="text-xs" style={{ color: MUTED }}>{rows.length} transaksi</span>
-                </div>
-                {rows.length === 0 ? (
-                  <div className="px-5 pb-4 text-xs" style={{ color: MUTED }}>Belum ada transaksi.</div>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm" style={{ borderCollapse: "collapse" }}>
-                      <thead>
-                        <tr style={{ color: MUTED }}>
-                          <th className="text-left font-semibold px-5 py-2 whitespace-nowrap">Tanggal</th>
-                          <th className="text-left font-semibold px-3 py-2 whitespace-nowrap">Jenis</th>
-                          <th className="text-left font-semibold px-3 py-2 whitespace-nowrap">Kategori</th>
-                          <th className="text-left font-semibold px-3 py-2 whitespace-nowrap">Catatan</th>
-                          <th className="text-right font-semibold px-3 py-2 whitespace-nowrap">Jumlah</th>
-                          <th className="px-3 py-2"></th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {rows.map((r, i) => (
-                          <tr key={r.id} style={{ background: i % 2 === 0 ? "white" : BG }}>
-                            <td className="px-5 py-2" style={{ color: INK }}>{r.date}</td>
-                            <td className="px-3 py-2" style={{ color: r.type === "setor" ? GREEN : RED, fontWeight: 600 }}>{r.type === "setor" ? "Setor" : "Tarik"}</td>
-                            <td className="px-3 py-2" style={{ color: MUTED }}>{r.category}</td>
-                            <td className="px-3 py-2" style={{ color: MUTED }}>{r.note || "—"}</td>
-                            <td className="text-right px-3 py-2 font-semibold" style={{ color: r.type === "setor" ? GREEN : RED }}>
-                              {r.type === "setor" ? "+" : "-"}{rupiah(r.amount)}
-                            </td>
-                            <td className="text-right px-3 py-2">
-                              <button onClick={() => removeEntry(r.id)} className="w-6 h-6 rounded-md flex items-center justify-center ml-auto" style={{ background: BG }}><Trash2 size={11} color={MUTED} /></button>
-                            </td>
-                          </tr>
-                        ))}
-                        <tr style={{ background: NAVY + "0D" }}>
-                          <td colSpan={4} className="px-5 py-2.5 font-bold text-right" style={{ color: NAVY }}>Total Tabungan</td>
-                          <td className="text-right px-3 py-2.5 font-bold" style={{ color: NAVY }} colSpan={2}>{rupiah(saldo(s.id))}</td>
-                        </tr>
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </Card>
-            );
-          })}
-        </div>
-      )}
     </div>
   );
 }
