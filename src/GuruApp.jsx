@@ -8,7 +8,7 @@ import {
 } from "./shared.jsx";
 import {
   LayoutDashboard, CalendarCheck, Award, ClipboardList, FileSpreadsheet,
-  Users, LogOut, Plus, Trash2, Download, TrendingUp, TrendingDown, Settings2,
+  Users, LogOut, Plus, Trash2, Download, TrendingUp, TrendingDown, Settings2, Pencil,
 } from "lucide-react";
 
 const NAV = [
@@ -32,7 +32,8 @@ export default function GuruApp({ profile, onLogout }) {
   const loadClasses = useCallback(async () => {
     const { data } = await supabase.from("classes").select("*").order("name");
     setClasses(data || []);
-    if (data?.length && !activeClassId) setActiveClassId(data[0].id);
+    const stillExists = data?.some((c) => c.id === activeClassId);
+    if (!stillExists) setActiveClassId(data?.[0]?.id || "");
   }, [activeClassId]);
 
   useEffect(() => { loadClasses(); }, []); // eslint-disable-line
@@ -435,7 +436,7 @@ function NilaiAkhirTab({ profile, classes, activeClassId, setActiveClassId, stud
     setLoading(true);
     const ids = students.map((s) => s.id);
     const [att, prac, exam, pts] = await Promise.all([
-      supabase.from("attendance").select("student_id,status").eq("guru_id", profile.id).eq("subject", profile.subject).in("student_id", ids),
+      supabase.from("attendance").select("student_id,status,date").eq("guru_id", profile.id).eq("subject", profile.subject).in("student_id", ids),
       supabase.from("practice_scores").select("student_id,score").eq("guru_id", profile.id).eq("subject", profile.subject).in("student_id", ids),
       supabase.from("final_exam_scores").select("student_id,score").eq("guru_id", profile.id).eq("subject", profile.subject).in("student_id", ids),
       supabase.from("points").select("student_id,type").eq("guru_id", profile.id).in("student_id", ids),
@@ -454,6 +455,9 @@ function NilaiAkhirTab({ profile, classes, activeClassId, setActiveClassId, stud
     const izin = attRows.filter((a) => a.status === "Izin").length;
     const sakit = attRows.filter((a) => a.status === "Sakit").length;
     const alpa = attRows.filter((a) => a.status === "Alpa").length;
+    const izinDates = attRows.filter((a) => a.status === "Izin").map((a) => a.date).sort();
+    const sakitDates = attRows.filter((a) => a.status === "Sakit").map((a) => a.date).sort();
+    const alpaDates = attRows.filter((a) => a.status === "Alpa").map((a) => a.date).sort();
     const totalSesi = attRows.length;
     const tidakMasuk = izin + sakit + alpa;
     const attPct = totalSesi ? Math.round((hadir / totalSesi) * 100) : 0;
@@ -462,13 +466,16 @@ function NilaiAkhirTab({ profile, classes, activeClassId, setActiveClassId, stud
     const exam = exams[s.id] || 0;
     const netPoints = points.filter((p) => p.student_id === s.id).reduce((sum, p) => sum + (p.type === "plus" ? 1 : -1), 0);
     const final = computeFinalScore({ attendancePct: attPct, avgPractice: avgPrac, examScore: exam, netPoints, weights });
-    return { id: s.id, name: s.name, hadir, izin, sakit, alpa, totalSesi, tidakMasuk, attPct, avgPrac, exam, netPoints, final };
+    return { id: s.id, name: s.name, hadir, izin, sakit, alpa, izinDates, sakitDates, alpaDates, totalSesi, tidakMasuk, attPct, avgPrac, exam, netPoints, final };
   }), [students, attendance, practice, exams, points, weights]);
 
   const handleExport = () => {
     const rekapAbsensi = rows.map((r) => ({
       Nama: r.name, Hadir: r.hadir, Izin: r.izin, Sakit: r.sakit, Alpa: r.alpa,
       "Total Tidak Masuk": r.tidakMasuk, "Total Pertemuan": r.totalSesi, "Kehadiran (%)": r.attPct,
+      "Tanggal Izin": r.izinDates.join(", ") || "-",
+      "Tanggal Sakit": r.sakitDates.join(", ") || "-",
+      "Tanggal Alpa": r.alpaDates.join(", ") || "-",
     }));
     const rekapNilai = rows.map((r) => ({
       Nama: r.name, "Kehadiran (%)": r.attPct, "Rata Praktek Harian": r.avgPrac,
@@ -549,6 +556,39 @@ function NilaiAkhirTab({ profile, classes, activeClassId, setActiveClassId, stud
         )}
       </Card>
 
+      <Card className="mb-5" style={{ padding: 0 }}>
+        <div className="px-5 pt-4 pb-2 text-sm font-bold" style={{ color: INK }}>Rincian Tanggal Ketidakhadiran</div>
+        {students.length === 0 ? <div className="px-5 pb-5"><EmptyState icon={CalendarCheck} text="Belum ada siswa di kelas ini." /></div> : loading ? (
+          <div className="px-5 pb-5 text-sm" style={{ color: MUTED }}>Memuat…</div>
+        ) : (
+          <div className="flex flex-col divide-y" style={{ borderColor: "#EEF0F3" }}>
+            {rows.map((r) => {
+              const noneAtAll = r.izinDates.length + r.sakitDates.length + r.alpaDates.length === 0;
+              return (
+                <div key={r.id} className="px-5 py-3">
+                  <div className="text-sm font-semibold mb-1.5" style={{ color: INK }}>{r.name}</div>
+                  {noneAtAll ? (
+                    <div className="text-xs" style={{ color: MUTED }}>Tidak ada catatan izin, sakit, atau alpa.</div>
+                  ) : (
+                    <div className="flex flex-col gap-1">
+                      {r.izinDates.length > 0 && (
+                        <div className="text-xs" style={{ color: "#B8760F" }}><b>Izin</b> ({r.izinDates.length}): {r.izinDates.join(", ")}</div>
+                      )}
+                      {r.sakitDates.length > 0 && (
+                        <div className="text-xs" style={{ color: "#3E5C94" }}><b>Sakit</b> ({r.sakitDates.length}): {r.sakitDates.join(", ")}</div>
+                      )}
+                      {r.alpaDates.length > 0 && (
+                        <div className="text-xs" style={{ color: RED }}><b>Alpa</b> ({r.alpaDates.length}): {r.alpaDates.join(", ")}</div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </Card>
+
       <Card style={{ padding: 0 }}>
         {students.length === 0 ? <EmptyState icon={LayoutDashboard} text="Belum ada siswa di kelas ini." /> : loading ? (
           <div className="p-5 text-sm" style={{ color: MUTED }}>Memuat…</div>
@@ -591,6 +631,8 @@ function NilaiAkhirTab({ profile, classes, activeClassId, setActiveClassId, stud
 function SiswaTab({ classes, reloadClasses, activeClassId, setActiveClassId, students, setStudents, notify }) {
   const [newClass, setNewClass] = useState("");
   const [name, setName] = useState("");
+  const [editingClassId, setEditingClassId] = useState(null);
+  const [editingClassName, setEditingClassName] = useState("");
 
   const addClass = async () => {
     const c = newClass.trim();
@@ -598,6 +640,21 @@ function SiswaTab({ classes, reloadClasses, activeClassId, setActiveClassId, stu
     const { error } = await supabase.from("classes").insert({ name: c });
     if (error) return notify("Gagal: " + error.message);
     setNewClass(""); reloadClasses(); notify("Kelas ditambahkan.");
+  };
+
+  const startEditClass = (c) => { setEditingClassId(c.id); setEditingClassName(c.name); };
+  const saveEditClass = async () => {
+    const nm = editingClassName.trim();
+    if (!nm) return;
+    const { error } = await supabase.from("classes").update({ name: nm }).eq("id", editingClassId);
+    if (error) return notify("Gagal: " + error.message);
+    setEditingClassId(null); reloadClasses(); notify("Nama kelas diperbarui.");
+  };
+  const deleteClass = async (c) => {
+    if (!confirm(`Hapus kelas "${c.name}"? Semua data siswa, absensi, dan nilai di kelas ini akan ikut terhapus permanen.`)) return;
+    const { error } = await supabase.from("classes").delete().eq("id", c.id);
+    if (error) return notify("Gagal: " + error.message);
+    reloadClasses(); notify("Kelas dihapus.");
   };
 
   const addStudent = async () => {
@@ -615,9 +672,33 @@ function SiswaTab({ classes, reloadClasses, activeClassId, setActiveClassId, stu
     <div>
       <PageHeader eyebrow="Data Bersama Sekolah" title="Kelas & Siswa" />
       <Card className="mb-5">
-        <div className="text-sm font-bold mb-3" style={{ color: INK }}>Tambah Kelas</div>
+        <div className="text-sm font-bold mb-3" style={{ color: INK }}>Kelas</div>
+        <div className="flex flex-col divide-y mb-4" style={{ borderColor: "#EEF0F3" }}>
+          {classes.length === 0 && <div className="text-xs py-2" style={{ color: MUTED }}>Belum ada kelas.</div>}
+          {classes.map((c) => (
+            <div key={c.id} className="flex items-center justify-between py-2.5 gap-2">
+              {editingClassId === c.id ? (
+                <>
+                  <input value={editingClassName} onChange={(e) => setEditingClassName(e.target.value)}
+                    className="text-sm px-2.5 py-1.5 rounded-md flex-1" style={{ background: BG, color: INK }}
+                    onKeyDown={(e) => e.key === "Enter" && saveEditClass()} autoFocus />
+                  <button onClick={saveEditClass} className="w-8 h-8 rounded-md flex items-center justify-center" style={{ background: "#EAF7EF" }}>✓</button>
+                  <button onClick={() => setEditingClassId(null)} className="w-8 h-8 rounded-md flex items-center justify-center" style={{ background: BG }}>✕</button>
+                </>
+              ) : (
+                <>
+                  <span className="text-sm font-medium" style={{ color: INK }}>{c.name}</span>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button onClick={() => startEditClass(c)} className="w-8 h-8 rounded-md flex items-center justify-center" style={{ background: BG }}><Pencil size={13} color={MUTED} /></button>
+                    <button onClick={() => deleteClass(c)} className="w-8 h-8 rounded-md flex items-center justify-center" style={{ background: "#FBEAEC" }}><Trash2 size={13} color={RED} /></button>
+                  </div>
+                </>
+              )}
+            </div>
+          ))}
+        </div>
         <div className="flex gap-2">
-          <input value={newClass} onChange={(e) => setNewClass(e.target.value)} placeholder="Nama kelas, mis. 8C" className="text-sm px-3 py-2 rounded-lg flex-1 max-w-xs" style={{ background: BG, color: INK }} />
+          <input value={newClass} onChange={(e) => setNewClass(e.target.value)} placeholder="Nama kelas, mis. 8C" className="text-sm px-3 py-2 rounded-lg flex-1 max-w-xs" style={{ background: BG, color: INK }} onKeyDown={(e) => e.key === "Enter" && addClass()} />
           <button onClick={addClass} className="px-3.5 py-2 rounded-lg text-sm font-semibold text-white flex items-center gap-1.5" style={{ background: NAVY }}><Plus size={14} /> Tambah</button>
         </div>
       </Card>
