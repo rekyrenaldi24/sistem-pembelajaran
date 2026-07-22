@@ -414,6 +414,7 @@ function UjianTab({ profile, classes, activeClassId, setActiveClassId, students,
 function NilaiAkhirTab({ profile, classes, activeClassId, setActiveClassId, students, activeClass, notify }) {
   const [weights, setWeights] = useState({ w_absensi: 20, w_praktek: 40, w_ujian: 30, w_poin: 10 });
   const [showSettings, setShowSettings] = useState(false);
+  const [expandedAtt, setExpandedAtt] = useState({});
   const [attendance, setAttendance] = useState([]);
   const [practice, setPractice] = useState([]);
   const [exams, setExams] = useState({});
@@ -458,6 +459,7 @@ function NilaiAkhirTab({ profile, classes, activeClassId, setActiveClassId, stud
     const izinDates = attRows.filter((a) => a.status === "Izin").map((a) => a.date).sort();
     const sakitDates = attRows.filter((a) => a.status === "Sakit").map((a) => a.date).sort();
     const alpaDates = attRows.filter((a) => a.status === "Alpa").map((a) => a.date).sort();
+    const hadirDates = attRows.filter((a) => a.status === "Hadir").map((a) => a.date).sort();
     const totalSesi = attRows.length;
     const tidakMasuk = izin + sakit + alpa;
     const attPct = totalSesi ? Math.round((hadir / totalSesi) * 100) : 0;
@@ -466,7 +468,7 @@ function NilaiAkhirTab({ profile, classes, activeClassId, setActiveClassId, stud
     const exam = exams[s.id] || 0;
     const netPoints = points.filter((p) => p.student_id === s.id).reduce((sum, p) => sum + (p.type === "plus" ? 1 : -1), 0);
     const final = computeFinalScore({ attendancePct: attPct, avgPractice: avgPrac, examScore: exam, netPoints, weights });
-    return { id: s.id, name: s.name, hadir, izin, sakit, alpa, izinDates, sakitDates, alpaDates, totalSesi, tidakMasuk, attPct, avgPrac, exam, netPoints, final };
+    return { id: s.id, name: s.name, hadir, izin, sakit, alpa, hadirDates, izinDates, sakitDates, alpaDates, totalSesi, tidakMasuk, attPct, avgPrac, exam, netPoints, final };
   }), [students, attendance, practice, exams, points, weights]);
 
   const handleExport = () => {
@@ -557,28 +559,35 @@ function NilaiAkhirTab({ profile, classes, activeClassId, setActiveClassId, stud
       </Card>
 
       <Card className="mb-5" style={{ padding: 0 }}>
-        <div className="px-5 pt-4 pb-2 text-sm font-bold" style={{ color: INK }}>Rincian Tanggal Ketidakhadiran</div>
+        <div className="px-5 pt-4 pb-2 text-sm font-bold" style={{ color: INK }}>Riwayat Absensi per Siswa</div>
+        <div className="px-5 pb-1 text-xs" style={{ color: MUTED }}>Klik nama siswa untuk lihat rincian tanggalnya.</div>
         {students.length === 0 ? <div className="px-5 pb-5"><EmptyState icon={CalendarCheck} text="Belum ada siswa di kelas ini." /></div> : loading ? (
           <div className="px-5 pb-5 text-sm" style={{ color: MUTED }}>Memuat…</div>
         ) : (
           <div className="flex flex-col divide-y" style={{ borderColor: "#EEF0F3" }}>
             {rows.map((r) => {
-              const noneAtAll = r.izinDates.length + r.sakitDates.length + r.alpaDates.length === 0;
+              const isOpen = !!expandedAtt[r.id];
               return (
-                <div key={r.id} className="px-5 py-3">
-                  <div className="text-sm font-semibold mb-1.5" style={{ color: INK }}>{r.name}</div>
-                  {noneAtAll ? (
-                    <div className="text-xs" style={{ color: MUTED }}>Tidak ada catatan izin, sakit, atau alpa.</div>
-                  ) : (
-                    <div className="flex flex-col gap-1">
-                      {r.izinDates.length > 0 && (
-                        <div className="text-xs" style={{ color: "#B8760F" }}><b>Izin</b> ({r.izinDates.length}): {r.izinDates.join(", ")}</div>
-                      )}
-                      {r.sakitDates.length > 0 && (
-                        <div className="text-xs" style={{ color: "#3E5C94" }}><b>Sakit</b> ({r.sakitDates.length}): {r.sakitDates.join(", ")}</div>
-                      )}
-                      {r.alpaDates.length > 0 && (
-                        <div className="text-xs" style={{ color: RED }}><b>Alpa</b> ({r.alpaDates.length}): {r.alpaDates.join(", ")}</div>
+                <div key={r.id}>
+                  <button onClick={() => setExpandedAtt((e) => ({ ...e, [r.id]: !e[r.id] }))}
+                    className="w-full flex items-center justify-between px-5 py-3 text-left">
+                    <div className="flex items-center gap-2">
+                      <span style={{ color: MUTED, fontSize: 11, width: 12, display: "inline-block" }}>{isOpen ? "▾" : "▸"}</span>
+                      <span className="text-sm font-semibold" style={{ color: INK }}>{r.name}</span>
+                    </div>
+                    <span className="text-xs" style={{ color: MUTED }}>{r.hadir} Hadir · {r.izin} Izin · {r.sakit} Sakit · {r.alpa} Alpa</span>
+                  </button>
+                  {isOpen && (
+                    <div className="px-5 pb-4 flex flex-col gap-1.5">
+                      {r.totalSesi === 0 ? (
+                        <div className="text-xs" style={{ color: MUTED }}>Belum ada data absensi.</div>
+                      ) : (
+                        <>
+                          <div className="text-xs" style={{ color: GREEN }}><b>Hadir</b> ({r.hadir}): {r.hadirDates.join(", ") || "-"}</div>
+                          <div className="text-xs" style={{ color: "#B8760F" }}><b>Izin</b> ({r.izin}): {r.izinDates.join(", ") || "-"}</div>
+                          <div className="text-xs" style={{ color: "#3E5C94" }}><b>Sakit</b> ({r.sakit}): {r.sakitDates.join(", ") || "-"}</div>
+                          <div className="text-xs" style={{ color: RED }}><b>Alpa</b> ({r.alpa}): {r.alpaDates.join(", ") || "-"}</div>
+                        </>
                       )}
                     </div>
                   )}
