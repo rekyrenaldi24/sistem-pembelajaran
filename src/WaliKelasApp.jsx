@@ -103,6 +103,7 @@ export default function WaliKelasApp({ profile, onLogout }) {
 function AbsensiTab({ profile, classes, activeClassId, setActiveClassId, students, notify, activeClass }) {
   const [date, setDate] = useState(todayStr());
   const [record, setRecord] = useState({});
+  const [expandedAtt, setExpandedAtt] = useState({});
   const [allRecords, setAllRecords] = useState([]);
   const [loadingRecap, setLoadingRecap] = useState(true);
 
@@ -119,7 +120,7 @@ function AbsensiTab({ profile, classes, activeClassId, setActiveClassId, student
   const loadRecap = useCallback(async () => {
     if (!students.length) { setAllRecords([]); setLoadingRecap(false); return; }
     setLoadingRecap(true);
-    const { data } = await supabase.from("homeroom_attendance").select("student_id,status").eq("wali_kelas_id", profile.id)
+    const { data } = await supabase.from("homeroom_attendance").select("student_id,status,date").eq("wali_kelas_id", profile.id)
       .in("student_id", students.map((s) => s.id));
     setAllRecords(data || []);
     setLoadingRecap(false);
@@ -151,10 +152,14 @@ function AbsensiTab({ profile, classes, activeClassId, setActiveClassId, student
     const izin = rs.filter((a) => a.status === "Izin").length;
     const sakit = rs.filter((a) => a.status === "Sakit").length;
     const alpa = rs.filter((a) => a.status === "Alpa").length;
+    const hadirDates = rs.filter((a) => a.status === "Hadir").map((a) => a.date).sort();
+    const izinDates = rs.filter((a) => a.status === "Izin").map((a) => a.date).sort();
+    const sakitDates = rs.filter((a) => a.status === "Sakit").map((a) => a.date).sort();
+    const alpaDates = rs.filter((a) => a.status === "Alpa").map((a) => a.date).sort();
     const total = rs.length;
     const tidakMasuk = izin + sakit + alpa;
     const pct = total ? Math.round((hadir / total) * 100) : 0;
-    return { id: s.id, name: s.name, hadir, izin, sakit, alpa, total, tidakMasuk, pct };
+    return { id: s.id, name: s.name, hadir, izin, sakit, alpa, hadirDates, izinDates, sakitDates, alpaDates, total, tidakMasuk, pct };
   }), [students, allRecords]);
 
   const handleExport = async () => {
@@ -220,39 +225,41 @@ function AbsensiTab({ profile, classes, activeClassId, setActiveClassId, student
       </Card>
 
       <Card style={{ padding: 0 }}>
-        <div className="px-5 pt-4 pb-2 text-sm font-bold" style={{ color: INK }}>Rekap Absensi Keseluruhan</div>
+        <div className="px-5 pt-4 pb-2 text-sm font-bold" style={{ color: INK }}>Riwayat Absensi per Siswa</div>
+        <div className="px-5 pb-1 text-xs" style={{ color: MUTED }}>Klik nama siswa untuk lihat rincian tanggalnya.</div>
         {students.length === 0 ? <div className="px-5 pb-5"><EmptyState icon={CalendarCheck} text="Belum ada siswa di kelas ini." /></div> : loadingRecap ? (
           <div className="px-5 pb-5 text-sm" style={{ color: MUTED }}>Memuat…</div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm" style={{ borderCollapse: "collapse" }}>
-              <thead>
-                <tr style={{ color: MUTED }}>
-                  <th className="text-left font-semibold px-5 py-2.5 whitespace-nowrap">Siswa</th>
-                  <th className="text-center font-semibold px-3 py-2.5 whitespace-nowrap">Hadir</th>
-                  <th className="text-center font-semibold px-3 py-2.5 whitespace-nowrap">Izin</th>
-                  <th className="text-center font-semibold px-3 py-2.5 whitespace-nowrap">Sakit</th>
-                  <th className="text-center font-semibold px-3 py-2.5 whitespace-nowrap">Alpa</th>
-                  <th className="text-center font-semibold px-3 py-2.5 whitespace-nowrap">Total Tidak Masuk</th>
-                  <th className="text-center font-semibold px-3 py-2.5 whitespace-nowrap">Total Pertemuan</th>
-                  <th className="text-center font-semibold px-3 py-2.5 whitespace-nowrap">% Kehadiran</th>
-                </tr>
-              </thead>
-              <tbody>
-                {recapRows.map((r, i) => (
-                  <tr key={r.id} style={{ background: i % 2 === 0 ? "white" : BG }}>
-                    <td className="px-5 py-2 font-medium" style={{ color: INK }}>{r.name}</td>
-                    <td className="text-center px-3 py-2" style={{ color: GREEN, fontWeight: 700 }}>{r.hadir}</td>
-                    <td className="text-center px-3 py-2" style={{ color: "#B8760F" }}>{r.izin}</td>
-                    <td className="text-center px-3 py-2" style={{ color: "#3E5C94" }}>{r.sakit}</td>
-                    <td className="text-center px-3 py-2" style={{ color: RED, fontWeight: 700 }}>{r.alpa}</td>
-                    <td className="text-center px-3 py-2" style={{ color: MUTED }}>{r.tidakMasuk}</td>
-                    <td className="text-center px-3 py-2" style={{ color: MUTED }}>{r.total}</td>
-                    <td className="text-center px-3 py-2 font-bold" style={{ color: INK }}>{r.pct}%</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="flex flex-col divide-y" style={{ borderColor: "#EEF0F3" }}>
+            {recapRows.map((r) => {
+              const isOpen = !!expandedAtt[r.id];
+              return (
+                <div key={r.id}>
+                  <button onClick={() => setExpandedAtt((e) => ({ ...e, [r.id]: !e[r.id] }))}
+                    className="w-full flex items-center justify-between px-5 py-3 text-left">
+                    <div className="flex items-center gap-2">
+                      <span style={{ color: MUTED, fontSize: 11, width: 12, display: "inline-block" }}>{isOpen ? "▾" : "▸"}</span>
+                      <span className="text-sm font-semibold" style={{ color: INK }}>{r.name}</span>
+                    </div>
+                    <span className="text-xs" style={{ color: MUTED }}>{r.hadir} Hadir · {r.izin} Izin · {r.sakit} Sakit · {r.alpa} Alpa · {r.pct}%</span>
+                  </button>
+                  {isOpen && (
+                    <div className="px-5 pb-4 flex flex-col gap-1.5">
+                      {r.total === 0 ? (
+                        <div className="text-xs" style={{ color: MUTED }}>Belum ada data absensi.</div>
+                      ) : (
+                        <>
+                          <div className="text-xs" style={{ color: GREEN }}><b>Hadir</b> ({r.hadir}): {r.hadirDates.join(", ") || "-"}</div>
+                          <div className="text-xs" style={{ color: "#B8760F" }}><b>Izin</b> ({r.izin}): {r.izinDates.join(", ") || "-"}</div>
+                          <div className="text-xs" style={{ color: "#3E5C94" }}><b>Sakit</b> ({r.sakit}): {r.sakitDates.join(", ") || "-"}</div>
+                          <div className="text-xs" style={{ color: RED }}><b>Alpa</b> ({r.alpa}): {r.alpaDates.join(", ") || "-"}</div>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
       </Card>
