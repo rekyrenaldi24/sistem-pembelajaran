@@ -8,7 +8,8 @@ export default function Auth() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
-  const [role, setRole] = useState("guru");
+  const [isGuru, setIsGuru] = useState(true);
+  const [isWaliKelas, setIsWaliKelas] = useState(false);
   const [subject, setSubject] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -25,7 +26,8 @@ export default function Auth() {
     e.preventDefault();
     setErr(""); setBusy(true);
     if (!name.trim()) { setErr("Nama wajib diisi."); setBusy(false); return; }
-    if (role === "guru" && !subject.trim()) { setErr("Mata pelajaran wajib diisi."); setBusy(false); return; }
+    if (!isGuru && !isWaliKelas) { setErr("Pilih minimal satu peran: Guru Mapel atau Wali Kelas."); setBusy(false); return; }
+    if (isGuru && !subject.trim()) { setErr("Mata pelajaran wajib diisi."); setBusy(false); return; }
 
     const { data, error } = await supabase.auth.signUp({ email, password });
     if (error) { setErr(error.message); setBusy(false); return; }
@@ -38,7 +40,8 @@ export default function Auth() {
       return;
     }
     const { error: profileErr } = await supabase.from("profiles").insert({
-      id: userId, name: name.trim(), role, subject: role === "guru" ? subject.trim() : null,
+      id: userId, name: name.trim(), is_guru: isGuru, is_wali_kelas: isWaliKelas,
+      subject: isGuru ? subject.trim() : null,
     });
     if (profileErr) { setErr(profileErr.message); setBusy(false); return; }
     setBusy(false);
@@ -73,16 +76,20 @@ export default function Auth() {
               <>
                 <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nama lengkap"
                   className="text-sm px-3 py-2.5 rounded-lg" style={{ background: "#F4F5F7", color: NAVY }} required />
-                <div className="flex rounded-lg overflow-hidden" style={{ border: "1px solid #E7E9EE" }}>
-                  {[["guru", "Guru Mapel"], ["wali_kelas", "Wali Kelas"]].map(([v, label]) => (
-                    <button key={v} type="button" onClick={() => setRole(v)}
-                      className="flex-1 py-2 text-xs font-bold"
-                      style={{ background: role === v ? ORANGE : "white", color: role === v ? "white" : MUTED }}>
-                      {label}
-                    </button>
-                  ))}
+                <div className="text-xs font-semibold" style={{ color: MUTED }}>Peran (boleh pilih keduanya):</div>
+                <div className="flex gap-2">
+                  <button type="button" onClick={() => setIsGuru((v) => !v)}
+                    className="flex-1 py-2 rounded-lg text-xs font-bold border"
+                    style={{ background: isGuru ? ORANGE : "white", color: isGuru ? "white" : MUTED, borderColor: isGuru ? ORANGE : "#E7E9EE" }}>
+                    {isGuru ? "✓ " : ""}Guru Mapel
+                  </button>
+                  <button type="button" onClick={() => setIsWaliKelas((v) => !v)}
+                    className="flex-1 py-2 rounded-lg text-xs font-bold border"
+                    style={{ background: isWaliKelas ? ORANGE : "white", color: isWaliKelas ? "white" : MUTED, borderColor: isWaliKelas ? ORANGE : "#E7E9EE" }}>
+                    {isWaliKelas ? "✓ " : ""}Wali Kelas
+                  </button>
                 </div>
-                {role === "guru" && (
+                {isGuru && (
                   <input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Mata pelajaran, mis. PJOK"
                     className="text-sm px-3 py-2.5 rounded-lg" style={{ background: "#F4F5F7", color: NAVY }} required />
                 )}
