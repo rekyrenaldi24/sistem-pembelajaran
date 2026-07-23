@@ -6,7 +6,7 @@ import {
   PageHeader, Card, EmptyState, ClassPicker, Toast,
 } from "./shared.jsx";
 import {
-  CalendarCheck, StickyNote, PiggyBank, Users, LogOut, Plus, Trash2, Download, Wallet, Pencil,
+  CalendarCheck, StickyNote, PiggyBank, Users, LogOut, Plus, Trash2, Download, Wallet, Pencil, Repeat,
 } from "lucide-react";
 
 const NAV = [
@@ -18,7 +18,7 @@ const NAV = [
 
 const SAVING_CATEGORIES = ["Tabungan Rutin", "Tabungan Wisata", "Tabungan Perpisahan", "Lainnya"];
 
-export default function WaliKelasApp({ profile, onLogout }) {
+export default function WaliKelasApp({ profile, onLogout, onSwitchRole }) {
   const [tab, setTab] = useState("absensi");
   const [classes, setClasses] = useState([]);
   const [activeClassId, setActiveClassId] = useState("");
@@ -76,6 +76,11 @@ export default function WaliKelasApp({ profile, onLogout }) {
           })}
         </nav>
         <div className="hidden md:block mt-auto px-3 py-5">
+          {onSwitchRole && (
+            <button onClick={onSwitchRole} className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-semibold w-full mb-1" style={{ color: "#A7B1C7" }}>
+              <Repeat size={16} /> Ganti Peran
+            </button>
+          )}
           <button onClick={onLogout} className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-semibold w-full" style={{ color: "#A7B1C7" }}>
             <LogOut size={16} /> Keluar
           </button>
@@ -92,7 +97,7 @@ export default function WaliKelasApp({ profile, onLogout }) {
         {tab === "absensi" && <AbsensiTab profile={profile} classes={classes} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} notify={notify} activeClass={activeClass} />}
         {tab === "catatan" && <CatatanTab profile={profile} classes={classes} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} notify={notify} />}
         {tab === "tabungan" && <TabunganTab profile={profile} classes={classes} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} notify={notify} activeClass={activeClass} />}
-        {tab === "siswa" && <SiswaTab classes={classes} reloadClasses={loadClasses} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} setStudents={setStudents} notify={notify} />}
+        {tab === "siswa" && <SiswaTab profile={profile} classes={classes} reloadClasses={loadClasses} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} setStudents={setStudents} notify={notify} />}
       </main>
       <Toast message={toast} onClose={() => setToast("")} />
     </div>
@@ -561,16 +566,17 @@ function TabunganTab({ profile, classes, activeClassId, setActiveClassId, studen
 }
 
 // ================= KELAS & SISWA =================
-function SiswaTab({ classes, reloadClasses, activeClassId, setActiveClassId, students, setStudents, notify }) {
+function SiswaTab({ profile, classes, reloadClasses, activeClassId, setActiveClassId, students, setStudents, notify }) {
   const [newClass, setNewClass] = useState("");
   const [name, setName] = useState("");
+  const [gender, setGender] = useState("L");
   const [editingClassId, setEditingClassId] = useState(null);
   const [editingClassName, setEditingClassName] = useState("");
 
   const addClass = async () => {
     const c = newClass.trim();
     if (!c) return;
-    const { error } = await supabase.from("classes").insert({ name: c });
+    const { error } = await supabase.from("classes").insert({ name: c, owner_id: profile.id });
     if (error) return notify("Gagal: " + error.message);
     setNewClass(""); reloadClasses(); notify("Kelas ditambahkan.");
   };
@@ -592,7 +598,7 @@ function SiswaTab({ classes, reloadClasses, activeClassId, setActiveClassId, stu
 
   const addStudent = async () => {
     if (!name.trim() || !activeClassId) return;
-    const { data, error } = await supabase.from("students").insert({ name: name.trim(), class_id: activeClassId }).select().single();
+    const { data, error } = await supabase.from("students").insert({ name: name.trim(), class_id: activeClassId, gender }).select().single();
     if (error) return notify("Gagal: " + error.message);
     setStudents((prev) => [...prev, data]); setName("");
   };
@@ -600,10 +606,16 @@ function SiswaTab({ classes, reloadClasses, activeClassId, setActiveClassId, stu
     await supabase.from("students").delete().eq("id", id);
     setStudents((prev) => prev.filter((s) => s.id !== id));
   };
+  const toggleGender = async (s) => {
+    const next = s.gender === "L" ? "P" : "L";
+    const { error } = await supabase.from("students").update({ gender: next }).eq("id", s.id);
+    if (error) return notify("Gagal: " + error.message);
+    setStudents((prev) => prev.map((x) => x.id === s.id ? { ...x, gender: next } : x));
+  };
 
   return (
     <div>
-      <PageHeader eyebrow="Data Bersama Sekolah" title="Kelas & Siswa" />
+      <PageHeader eyebrow="Data Anda Sendiri" title="Kelas & Siswa" />
       <Card className="mb-5">
         <div className="text-sm font-bold mb-3" style={{ color: INK }}>Kelas</div>
         <div className="flex flex-col divide-y mb-4" style={{ borderColor: "#EEF0F3" }}>
@@ -640,8 +652,16 @@ function SiswaTab({ classes, reloadClasses, activeClassId, setActiveClassId, stu
           <div className="text-sm font-bold" style={{ color: INK }}>Siswa</div>
           <ClassPicker classes={classes} value={activeClassId} onChange={setActiveClassId} />
         </div>
-        <div className="flex gap-2 mb-4">
-          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nama siswa baru" className="text-sm px-3 py-2 rounded-lg flex-1" style={{ background: BG, color: INK }} onKeyDown={(e) => e.key === "Enter" && addStudent()} />
+        <div className="flex gap-2 mb-4 flex-wrap">
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nama siswa baru" className="text-sm px-3 py-2 rounded-lg flex-1 min-w-[160px]" style={{ background: BG, color: INK }} onKeyDown={(e) => e.key === "Enter" && addStudent()} />
+          <div className="flex rounded-lg overflow-hidden" style={{ border: "1px solid #E7E9EE" }}>
+            {["L", "P"].map((g) => (
+              <button key={g} type="button" onClick={() => setGender(g)}
+                className="px-3 py-2 text-xs font-bold" style={{ background: gender === g ? ORANGE : "white", color: gender === g ? "white" : MUTED }}>
+                {g}
+              </button>
+            ))}
+          </div>
           <button onClick={addStudent} className="px-3.5 py-2 rounded-lg text-sm font-semibold text-white flex items-center gap-1.5" style={{ background: ORANGE }}><Plus size={14} /> Tambah</button>
         </div>
         {students.length === 0 ? <EmptyState icon={Users} text="Belum ada siswa di kelas ini." /> : (
@@ -649,7 +669,14 @@ function SiswaTab({ classes, reloadClasses, activeClassId, setActiveClassId, stu
             {students.map((s) => (
               <div key={s.id} className="flex items-center justify-between py-2.5">
                 <span className="text-sm" style={{ color: INK }}>{s.name}</span>
-                <button onClick={() => removeStudent(s.id)} className="w-8 h-8 rounded-md flex items-center justify-center" style={{ background: "#FBEAEC" }}><Trash2 size={13} color={RED} /></button>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => toggleGender(s)} className="text-xs font-bold px-2 py-1 rounded-md"
+                    style={{ background: s.gender === "P" ? "#FBEAF2" : "#EAF1FB", color: s.gender === "P" ? "#C23B78" : "#2B5FB8" }}
+                    title="Klik untuk ubah">
+                    {s.gender || "?"}
+                  </button>
+                  <button onClick={() => removeStudent(s.id)} className="w-8 h-8 rounded-md flex items-center justify-center" style={{ background: "#FBEAEC" }}><Trash2 size={13} color={RED} /></button>
+                </div>
               </div>
             ))}
           </div>
