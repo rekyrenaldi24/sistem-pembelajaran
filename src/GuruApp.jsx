@@ -3,12 +3,12 @@ import { supabase } from "./supabaseClient.js";
 import {
   NAVY, NAVY2, ORANGE, BG, INK, MUTED, GREEN, RED,
   ATT_STATUSES, POINT_CATEGORIES, todayStr, gradeLetter,
-  computeFinalScore, exportToExcel,
+  computeFinalScore, exportToExcel, downloadStudentTemplate, parseStudentsExcel,
   PageHeader, Card, EmptyState, ClassPicker, Toast,
 } from "./shared.jsx";
 import {
   LayoutDashboard, CalendarCheck, Award, ClipboardList, FileSpreadsheet,
-  Users, LogOut, Plus, Trash2, Download, TrendingUp, TrendingDown, Settings2, Pencil, Repeat,
+  Users, LogOut, Plus, Trash2, Download, TrendingUp, TrendingDown, Settings2, Pencil, Repeat, FileDown, Upload,
 } from "lucide-react";
 
 const NAV = [
@@ -747,6 +747,28 @@ function SiswaTab({ profile, classes, reloadClasses, activeClassId, setActiveCla
     setStudents((prev) => prev.map((x) => x.id === s.id ? { ...x, gender: next } : x));
   };
 
+  const [importing, setImporting] = useState(false);
+  const fileInputRef = React.useRef(null);
+  const handleImportFile = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file || !activeClassId) return;
+    setImporting(true);
+    try {
+      const rows = await parseStudentsExcel(file);
+      if (rows.length === 0) { notify("Tidak ada data siswa yang terbaca di file itu."); setImporting(false); return; }
+      const toInsert = rows.map((r) => ({ name: r.name, gender: r.gender, class_id: activeClassId }));
+      const { data, error } = await supabase.from("students").insert(toInsert).select();
+      if (error) { notify("Gagal impor: " + error.message); setImporting(false); return; }
+      setStudents((prev) => [...prev, ...data]);
+      const missingGender = rows.filter((r) => !r.gender).length;
+      notify(`${data.length} siswa berhasil diimpor.` + (missingGender ? ` (${missingGender} tanpa jenis kelamin, isi manual)` : ""));
+    } catch (err) {
+      notify("Gagal membaca file: " + err.message);
+    }
+    setImporting(false);
+  };
+
   return (
     <div>
       <PageHeader eyebrow="Data Anda Sendiri" title="Kelas & Siswa" />
@@ -785,6 +807,17 @@ function SiswaTab({ profile, classes, reloadClasses, activeClassId, setActiveCla
         <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
           <div className="text-sm font-bold" style={{ color: INK }}>Siswa</div>
           <ClassPicker classes={classes} value={activeClassId} onChange={setActiveClassId} />
+        </div>
+        <div className="flex flex-wrap gap-2 mb-4 pb-4" style={{ borderBottom: "1px solid #EEF0F3" }}>
+          <button onClick={downloadStudentTemplate} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold" style={{ background: BG, color: INK }}>
+            <FileDown size={14} /> Unduh Template Excel
+          </button>
+          <button onClick={() => fileInputRef.current?.click()} disabled={!activeClassId || importing}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold text-white" style={{ background: ORANGE, opacity: (!activeClassId || importing) ? 0.6 : 1 }}>
+            <Upload size={14} /> {importing ? "Mengimpor…" : "Upload Excel Siswa"}
+          </button>
+          <input ref={fileInputRef} type="file" accept=".xlsx,.xls" onChange={handleImportFile} className="hidden" />
+          <span className="text-xs self-center" style={{ color: MUTED }}>Isi kolom Nama & Jenis Kelamin (L/P) di template, lalu upload lagi ke sini.</span>
         </div>
         <div className="flex gap-2 mb-4 flex-wrap">
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nama siswa baru" className="text-sm px-3 py-2 rounded-lg flex-1 min-w-[160px]" style={{ background: BG, color: INK }} onKeyDown={(e) => e.key === "Enter" && addStudent()} />
