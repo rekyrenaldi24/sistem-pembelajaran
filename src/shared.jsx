@@ -58,6 +58,42 @@ export function exportToExcel(sheets, fileName) {
   XLSX.writeFile(wb, fileName);
 }
 
+export function downloadStudentTemplate() {
+  const rows = [
+    { Nama: "Contoh: Budi Santoso", "Jenis Kelamin (L/P)": "L" },
+    { Nama: "Contoh: Siti Aminah", "Jenis Kelamin (L/P)": "P" },
+  ];
+  exportToExcel([{ name: "Template Siswa", rows }], "Template_Daftar_Siswa.xlsx");
+}
+
+// Membaca file .xlsx yang diupload, mengembalikan [{ name, gender }]
+export function parseStudentsExcel(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = new Uint8Array(e.target.result);
+        const wb = XLSX.read(data, { type: "array" });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const json = XLSX.utils.sheet_to_json(ws, { defval: "" });
+        const parsed = json.map((row) => {
+          const nameKey = Object.keys(row).find((k) => k.toLowerCase().trim() === "nama");
+          const genderKey = Object.keys(row).find((k) => k.toLowerCase().includes("kelamin") || k.toLowerCase().trim() === "l/p");
+          const name = (nameKey ? String(row[nameKey]) : "").trim();
+          let gender = (genderKey ? String(row[genderKey]) : "").trim().toUpperCase();
+          if (gender !== "L" && gender !== "P") gender = null;
+          return { name, gender };
+        }).filter((r) => r.name && !r.name.toLowerCase().startsWith("contoh"));
+        resolve(parsed);
+      } catch (err) {
+        reject(err);
+      }
+    };
+    reader.onerror = () => reject(new Error("Gagal membaca file."));
+    reader.readAsArrayBuffer(file);
+  });
+}
+
 // ---------- Shared UI ----------
 export function PageHeader({ eyebrow, title, right }) {
   return (
