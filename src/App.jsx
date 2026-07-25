@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { supabase } from "./supabaseClient.js";
 import Auth from "./Auth.jsx";
+import ResetPassword from "./ResetPassword.jsx";
 import GuruApp from "./GuruApp.jsx";
 import WaliKelasApp from "./WaliKelasApp.jsx";
 import { NAVY, NAVY2, ORANGE, BG, MUTED } from "./shared.jsx";
@@ -11,10 +12,14 @@ export default function App() {
   const [profile, setProfile] = useState(null);
   const [loadingProfile, setLoadingProfile] = useState(false);
   const [activeRole, setActiveRole] = useState(null); // "guru" | "wali_kelas" | null (belum dipilih)
+  const [recoveryMode, setRecoveryMode] = useState(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => setSession(s));
+    const { data: sub } = supabase.auth.onAuthStateChange((event, s) => {
+      setSession(s);
+      if (event === "PASSWORD_RECOVERY") setRecoveryMode(true);
+    });
     return () => sub.subscription.unsubscribe();
   }, []);
 
@@ -26,6 +31,10 @@ export default function App() {
   }, [session]);
 
   useEffect(() => { setActiveRole(null); }, [session?.user?.id]);
+
+  if (recoveryMode) {
+    return <ResetPassword onDone={() => setRecoveryMode(false)} />;
+  }
 
   if (session === undefined || (session && loadingProfile)) {
     return (
