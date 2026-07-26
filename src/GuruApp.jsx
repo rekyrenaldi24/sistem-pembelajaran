@@ -8,8 +8,9 @@ import {
 } from "./shared.jsx";
 import {
   LayoutDashboard, CalendarCheck, Award, ClipboardList, FileSpreadsheet,
-  Users, LogOut, Plus, Trash2, Download, TrendingUp, TrendingDown, Settings2, Pencil, Repeat, FileDown, Upload,
+  Users, LogOut, Plus, Trash2, Download, TrendingUp, TrendingDown, Settings2, Pencil, Repeat, FileDown, Upload, History,
 } from "lucide-react";
+import AuditLogTab from "./AuditLog.jsx";
 
 const NAV = [
   { key: "absensi", label: "Absensi", icon: CalendarCheck },
@@ -18,6 +19,7 @@ const NAV = [
   { key: "ujian", label: "Ujian Akhir", icon: FileSpreadsheet },
   { key: "akhir", label: "Nilai Akhir", icon: LayoutDashboard },
   { key: "siswa", label: "Kelas & Siswa", icon: Users },
+  { key: "riwayat", label: "Riwayat Aktivitas", icon: History },
 ];
 
 export default function GuruApp({ profile, onLogout, onSwitchRole }) {
@@ -85,6 +87,7 @@ export default function GuruApp({ profile, onLogout, onSwitchRole }) {
         {tab === "ujian" && <UjianTab profile={profile} classes={classes} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} notify={notify} />}
         {tab === "akhir" && <NilaiAkhirTab profile={profile} classes={classes} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} activeClass={activeClass} notify={notify} />}
         {tab === "siswa" && <SiswaTab profile={profile} classes={classes} reloadClasses={loadClasses} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} setStudents={setStudents} notify={notify} />}
+        {tab === "riwayat" && <AuditLogTab profile={profile} />}
       </main>
       <Toast message={toast} onClose={() => setToast("")} />
     </div>
@@ -153,9 +156,11 @@ function AbsensiTab({ profile, classes, activeClassId, setActiveClassId, student
         </div>
         {students.length === 0 ? <EmptyState icon={Users} text="Belum ada siswa di kelas ini. Tambahkan lewat tab Kelas & Siswa." /> : (
           <div className="flex flex-col divide-y" style={{ borderColor: "#EEF0F3" }}>
-            {students.map((s) => (
+            {students.map((s, i) => (
               <div key={s.id} className="flex items-center justify-between py-2.5 gap-3 flex-wrap">
-                <span className="text-sm font-medium" style={{ color: INK }}>{s.name}</span>
+                <span className="text-sm font-medium" style={{ color: INK }}>
+                  <span style={{ color: MUTED, fontWeight: 600 }}>{i + 1}.</span> {s.name}
+                </span>
                 <div className="flex gap-1.5">
                   {ATT_STATUSES.map((st) => {
                     const active = record[s.id] === st.key;
