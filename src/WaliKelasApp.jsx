@@ -6,14 +6,16 @@ import {
   PageHeader, Card, EmptyState, ClassPicker, Toast,
 } from "./shared.jsx";
 import {
-  CalendarCheck, StickyNote, PiggyBank, Users, LogOut, Plus, Trash2, Download, Wallet, Pencil, Repeat, FileDown, Upload,
+  CalendarCheck, StickyNote, PiggyBank, Users, LogOut, Plus, Trash2, Download, Wallet, Pencil, Repeat, FileDown, Upload, History,
 } from "lucide-react";
+import AuditLogTab from "./AuditLog.jsx";
 
 const NAV = [
   { key: "absensi", label: "Absensi Kelas", icon: CalendarCheck },
   { key: "catatan", label: "Catatan", icon: StickyNote },
   { key: "tabungan", label: "Tabungan", icon: PiggyBank },
   { key: "siswa", label: "Kelas & Siswa", icon: Users },
+  { key: "riwayat", label: "Riwayat Aktivitas", icon: History },
 ];
 
 const SAVING_CATEGORIES = ["Tabungan Rutin", "Tabungan Wisata", "Tabungan Perpisahan", "Lainnya"];
@@ -98,6 +100,7 @@ export default function WaliKelasApp({ profile, onLogout, onSwitchRole }) {
         {tab === "catatan" && <CatatanTab profile={profile} classes={classes} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} notify={notify} />}
         {tab === "tabungan" && <TabunganTab profile={profile} classes={classes} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} notify={notify} activeClass={activeClass} />}
         {tab === "siswa" && <SiswaTab profile={profile} classes={classes} reloadClasses={loadClasses} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} setStudents={setStudents} notify={notify} />}
+        {tab === "riwayat" && <AuditLogTab profile={profile} />}
       </main>
       <Toast message={toast} onClose={() => setToast("")} />
     </div>
@@ -208,9 +211,11 @@ function AbsensiTab({ profile, classes, activeClassId, setActiveClassId, student
         </div>
         {students.length === 0 ? <EmptyState icon={Users} text="Belum ada siswa di kelas ini." /> : (
           <div className="flex flex-col divide-y" style={{ borderColor: "#EEF0F3" }}>
-            {students.map((s) => (
+            {students.map((s, i) => (
               <div key={s.id} className="flex items-center justify-between py-2.5 gap-3 flex-wrap">
-                <span className="text-sm font-medium" style={{ color: INK }}>{s.name}</span>
+                <span className="text-sm font-medium" style={{ color: INK }}>
+                  <span style={{ color: MUTED, fontWeight: 600 }}>{i + 1}.</span> {s.name}
+                </span>
                 <div className="flex gap-1.5">
                   {ATT_STATUSES.map((st) => {
                     const active = record[s.id] === st.key;
