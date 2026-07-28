@@ -380,6 +380,7 @@ function TabunganTab({ profile, classes, activeClassId, setActiveClassId, studen
   const [category, setCategory] = useState(SAVING_CATEGORIES[0]);
   const [amount, setAmount] = useState("");
   const [note, setNote] = useState("");
+  const [txDate, setTxDate] = useState(todayStr());
   const [log, setLog] = useState([]);
   const [gridMonth, setGridMonth] = useState(todayStr().slice(0, 7)); // "YYYY-MM"
   const [expanded, setExpanded] = useState({}); // { [studentId]: true/false }
@@ -398,7 +399,7 @@ function TabunganTab({ profile, classes, activeClassId, setActiveClassId, studen
   const addEntry = async () => {
     if (!studentId || !amount) return;
     const { error } = await supabase.from("savings").insert({
-      student_id: studentId, wali_kelas_id: profile.id, type, category, amount: Number(amount), note: note.trim() || null, date: todayStr(),
+      student_id: studentId, wali_kelas_id: profile.id, type, category, amount: Number(amount), note: note.trim() || null, date: txDate,
     });
     if (error) return notify("Gagal: " + error.message);
     setAmount(""); setNote(""); loadLog(); notify("Transaksi tersimpan.");
@@ -490,6 +491,7 @@ function TabunganTab({ profile, classes, activeClassId, setActiveClassId, studen
           <select value={category} onChange={(e) => setCategory(e.target.value)} className="text-sm px-3 py-2 rounded-lg" style={{ background: BG, color: INK }}>
             {SAVING_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
+          <input type="date" value={txDate} onChange={(e) => setTxDate(e.target.value)} className="text-sm px-3 py-2 rounded-lg font-semibold" style={{ background: BG, color: INK }} title="Tanggal transaksi" />
           <input type="number" min={0} value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="Jumlah (Rp)" className="text-sm px-3 py-2 rounded-lg w-32" style={{ background: BG, color: INK }} />
           <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Catatan (opsional)" className="text-sm px-3 py-2 rounded-lg flex-1 min-w-[150px]" style={{ background: BG, color: INK }} />
           <button onClick={addEntry} className="px-3.5 py-2 rounded-lg text-sm font-semibold text-white flex items-center gap-1.5" style={{ background: NAVY }}><Plus size={14} /> Simpan</button>
