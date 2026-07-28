@@ -59,18 +59,30 @@ export default function WaliKelasApp({ profile, onLogout, onSwitchRole }) {
 
   return (
     <div className="min-h-screen w-full flex flex-col md:flex-row" style={{ background: BG, fontFamily: "Arial, sans-serif" }}>
-      <aside className="md:w-60 w-full shrink-0 flex md:flex-col" style={{ background: NAVY }}>
-        <div className="hidden md:block px-6 pt-7 pb-5">
-          <div className="text-white font-bold text-lg leading-tight">Sistem Pembelajaran</div>
-          <div className="text-xs mt-0.5" style={{ color: "#93A0BE" }}>{profile.name} · Wali Kelas</div>
+      <aside className="md:w-60 w-full shrink-0 flex flex-col" style={{ background: NAVY }}>
+        <div className="flex md:block items-center justify-between px-4 md:px-6 py-3 md:pt-7 md:pb-5">
+          <div>
+            <div className="text-white font-bold text-base md:text-lg leading-tight">Sistem Pembelajaran</div>
+            <div className="hidden md:block text-xs mt-0.5" style={{ color: "#93A0BE" }}>{profile.name} · Wali Kelas</div>
+          </div>
+          <div className="flex items-center gap-1 md:hidden">
+            {onSwitchRole && (
+              <button onClick={onSwitchRole} title="Ganti Peran" className="w-9 h-9 rounded-lg flex items-center justify-center" style={{ color: "#A7B1C7" }}>
+                <Repeat size={18} />
+              </button>
+            )}
+            <button onClick={onLogout} title="Keluar" className="w-9 h-9 rounded-lg flex items-center justify-center" style={{ color: "#A7B1C7" }}>
+              <LogOut size={18} />
+            </button>
+          </div>
         </div>
-        <nav className="flex md:flex-col flex-1 md:px-3 md:py-2 overflow-x-auto md:overflow-visible">
+        <nav className="flex md:flex-col flex-1 md:px-3 md:py-2 overflow-x-auto md:overflow-visible" style={{ borderTop: "1px solid #243453" }}>
           {NAV.map((n) => {
             const Icon = n.icon;
             const active = tab === n.key;
             return (
               <button key={n.key} onClick={() => setTab(n.key)}
-                className="flex items-center gap-2.5 px-4 md:px-3 py-3 md:py-2.5 md:rounded-lg text-sm font-semibold shrink-0 md:mb-1"
+                className="flex items-center gap-2.5 px-4 md:px-3 py-3 md:py-2.5 md:rounded-lg text-sm font-semibold shrink-0 md:mb-1 whitespace-nowrap"
                 style={{ color: active ? "white" : "#A7B1C7", background: active ? NAVY2 : "transparent" }}>
                 <Icon size={17} /><span>{n.label}</span>
               </button>
@@ -137,6 +149,15 @@ function AbsensiTab({ profile, classes, activeClassId, setActiveClassId, student
   useEffect(() => { loadRecap(); }, [loadRecap, record]);
 
   const setStatus = async (studentId, status) => {
+    const isUndo = record[studentId] === status;
+    if (isUndo) {
+      setRecord((r) => { const next = { ...r }; delete next[studentId]; return next; });
+      const { error } = await supabase.from("homeroom_attendance").delete()
+        .eq("student_id", studentId).eq("wali_kelas_id", profile.id).eq("date", date);
+      if (error) notify("Gagal: " + error.message);
+      loadRecap();
+      return;
+    }
     setRecord((r) => ({ ...r, [studentId]: status }));
     const { error } = await supabase.from("homeroom_attendance").upsert(
       { student_id: studentId, wali_kelas_id: profile.id, date, status },
@@ -152,6 +173,16 @@ function AbsensiTab({ profile, classes, activeClassId, setActiveClassId, student
     const rec = {}; students.forEach((s) => { rec[s.id] = status; });
     setRecord(rec);
     loadRecap();
+  };
+  const clearAll = async () => {
+    if (!confirm(`Hapus semua tanda absensi tanggal ${date} untuk kelas ini?`)) return;
+    const { error } = await supabase.from("homeroom_attendance").delete()
+      .eq("wali_kelas_id", profile.id).eq("date", date)
+      .in("student_id", students.map((s) => s.id));
+    if (error) return notify("Gagal: " + error.message);
+    setRecord({});
+    loadRecap();
+    notify("Semua tanda absensi tanggal itu sudah dihapus.");
   };
 
   const recapRows = useMemo(() => students.map((s) => {
@@ -197,6 +228,9 @@ function AbsensiTab({ profile, classes, activeClassId, setActiveClassId, student
                 Tandai semua {st.key}
               </button>
             ))}
+            <button onClick={clearAll} className="px-3 py-1.5 rounded-lg text-xs font-semibold" style={{ background: "#EEF0F3", color: MUTED }}>
+              Hapus Semua Tanda
+            </button>
             <button onClick={handleExport} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white" style={{ background: GREEN }}>
               <Download size={13} /> Unduh Excel
             </button>
