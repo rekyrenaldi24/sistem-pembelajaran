@@ -68,7 +68,7 @@ export default function Auth() {
     <div className="min-h-screen w-full flex items-center justify-center p-5" style={{ background: NAVY, fontFamily: "Arial, sans-serif" }}>
       <div className="w-full max-w-sm">
         <div className="text-center mb-7">
-          <div className="text-white font-bold text-2xl">Sistem Pembelajaran</div>
+          <div className="text-white font-bold text-2xl">R3 EDU</div>
           <div className="text-sm mt-1" style={{ color: "#93A0BE" }}>Guru Mapel & Wali Kelas</div>
         </div>
 
