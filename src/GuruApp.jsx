@@ -53,7 +53,7 @@ export default function GuruApp({ profile, onLogout, onSwitchRole }) {
       <aside className="md:w-60 w-full shrink-0 flex flex-col" style={{ background: NAVY }}>
         <div className="flex md:block items-center justify-between px-4 md:px-6 py-3 md:pt-7 md:pb-5">
           <div>
-            <div className="text-white font-bold text-base md:text-lg leading-tight">Sistem Pembelajaran</div>
+            <div className="text-white font-bold text-base md:text-lg leading-tight">R3 EDU</div>
             <div className="hidden md:block text-xs mt-0.5" style={{ color: "#93A0BE" }}>{profile.name} · Guru {profile.subject}</div>
           </div>
           <div className="flex items-center gap-1 md:hidden">
