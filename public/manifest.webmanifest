@@ -1,0 +1,17 @@
+{
+  "name": "R3 EDU",
+  "short_name": "R3 EDU",
+  "description": "Absensi, nilai, poin, catatan, dan tabungan untuk Guru Mapel & Wali Kelas",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#F4F5F7",
+  "theme_color": "#16233F",
+  "orientation": "portrait-primary",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
