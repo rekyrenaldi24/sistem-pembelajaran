@@ -26,6 +26,14 @@ export const POINT_CATEGORIES = {
 
 export const todayStr = () => new Date().toISOString().slice(0, 10);
 
+// Hash SHA-256 (hex) untuk password Biodata Siswa — supaya password tidak
+// tersimpan polos di database, dan hasilnya konsisten dipakai untuk cek login.
+export async function sha256Hex(text) {
+  const enc = new TextEncoder().encode(text);
+  const hashBuffer = await crypto.subtle.digest("SHA-256", enc);
+  return Array.from(new Uint8Array(hashBuffer)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 export function gradeLetter(v) {
   if (v >= 90) return "A";
   if (v >= 80) return "B";
