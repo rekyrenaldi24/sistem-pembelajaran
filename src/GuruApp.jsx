@@ -9,14 +9,19 @@ import {
 import { offlineWrite, genId } from "./offlineSync.js";
 import {
   LayoutDashboard, CalendarCheck, Award, ClipboardList, FileSpreadsheet,
-  Users, LogOut, Plus, Trash2, Download, TrendingUp, TrendingDown, Settings2, Pencil, Repeat, FileDown, Upload, History,
+  Users, LogOut, Plus, Trash2, Download, TrendingUp, TrendingDown, Settings2, Pencil, Repeat, FileDown, Upload, History, Activity,
 } from "lucide-react";
 import AuditLogTab from "./AuditLog.jsx";
+import {
+  scoreLari60, scoreGantung, scoreSitup, scoreLoncat, scoreLariJauh,
+  classifyTotal, totalToScale100, gantungLabel, lariJauhLabel, mmssToDetik, detikToMMSS,
+} from "./tkji.js";
 
 const NAV = [
   { key: "absensi", label: "Absensi", icon: CalendarCheck },
   { key: "poin", label: "Poin & Catatan", icon: Award },
   { key: "praktek", label: "Nilai Harian", icon: ClipboardList },
+  { key: "kebugaran", label: "Tes Kebugaran", icon: Activity },
   { key: "ujian", label: "Ujian Akhir", icon: FileSpreadsheet },
   { key: "akhir", label: "Nilai Akhir", icon: LayoutDashboard },
   { key: "siswa", label: "Kelas & Siswa", icon: Users },
@@ -99,6 +104,7 @@ export default function GuruApp({ profile, onLogout, onSwitchRole }) {
         {tab === "absensi" && <AbsensiTab profile={profile} classes={classes} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} notify={notify} />}
         {tab === "poin" && <PoinTab profile={profile} classes={classes} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} notify={notify} />}
         {tab === "praktek" && <PraktekTab profile={profile} classes={classes} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} notify={notify} />}
+        {tab === "kebugaran" && <TkjiTab profile={profile} classes={classes} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} notify={notify} />}
         {tab === "ujian" && <UjianTab profile={profile} classes={classes} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} notify={notify} />}
         {tab === "akhir" && <NilaiAkhirTab profile={profile} classes={classes} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} activeClass={activeClass} notify={notify} />}
         {tab === "siswa" && <SiswaTab profile={profile} classes={classes} setClasses={setClasses} reloadClasses={loadClasses} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} setStudents={setStudents} notify={notify} />}
@@ -330,6 +336,184 @@ function PoinTab({ profile, classes, activeClassId, setActiveClassId, students, 
 }
 
 // ================= NILAI PRAKTEK HARIAN =================
+// ================= TES KEBUGARAN (TKJI) =================
+function TkjiTab({ profile, classes, activeClassId, setActiveClassId, students, notify }) {
+  const [studentId, setStudentId] = useState("");
+  const [draftMap, setDraftMap] = useState({});
+  const emptyForm = { lari60: "", gantung: "", situp: "", loncat: "", lariMenit: "", lariDetik: "" };
+  const [form, setForm] = useState(emptyForm);
+  const [sending, setSending] = useState(false);
+
+  useEffect(() => { setStudentId(students[0]?.id || ""); }, [students]);
+
+  const loadDrafts = useCallback(async () => {
+    if (!students.length) { setDraftMap({}); return; }
+    const { data } = await supabase.from("fitness_tests").select("*").in("student_id", students.map((s) => s.id));
+    const map = {};
+    (data || []).forEach((d) => { map[d.student_id] = d; });
+    setDraftMap(map);
+  }, [students]);
+
+  useEffect(() => { loadDrafts(); }, [loadDrafts]);
+
+  useEffect(() => {
+    const d = draftMap[studentId];
+    if (!d) { setForm(emptyForm); return; }
+    const mmss = detikToMMSS(d.lari_jauh_detik);
+    setForm({
+      lari60: d.lari60_detik ?? "",
+      gantung: d.gantung_raw ?? "",
+      situp: d.situp_reps ?? "",
+      loncat: d.loncat_cm ?? "",
+      lariMenit: mmss.menit,
+      lariDetik: mmss.detik,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [studentId, draftMap]);
+
+  const student = students.find((s) => s.id === studentId);
+  const gender = student?.gender || "L";
+
+  const saveDraft = async (nextForm) => {
+    if (!studentId) return;
+    const lariJauhDetik = (nextForm.lariMenit === "" && nextForm.lariDetik === "") ? null : mmssToDetik(nextForm.lariMenit, nextForm.lariDetik);
+    const row = {
+      student_id: studentId,
+      guru_id: profile.id,
+      lari60_detik: nextForm.lari60 === "" ? null : Number(nextForm.lari60),
+      gantung_raw: nextForm.gantung === "" ? null : Number(nextForm.gantung),
+      situp_reps: nextForm.situp === "" ? null : Number(nextForm.situp),
+      loncat_cm: nextForm.loncat === "" ? null : Number(nextForm.loncat),
+      lari_jauh_detik: lariJauhDetik,
+      updated_at: new Date().toISOString(),
+    };
+    await offlineWrite("fitness_tests", "upsert", row, { onConflict: "student_id" });
+    setDraftMap((m) => ({ ...m, [studentId]: row }));
+  };
+
+  const s1 = scoreLari60(form.lari60, gender);
+  const s2 = scoreGantung(form.gantung, gender);
+  const s3 = scoreSitup(form.situp, gender);
+  const s4 = scoreLoncat(form.loncat, gender);
+  const lariJauhDetikForm = (form.lariMenit === "" && form.lariDetik === "") ? "" : mmssToDetik(form.lariMenit, form.lariDetik);
+  const s5 = scoreLariJauh(lariJauhDetikForm, gender);
+  const allScores = [s1, s2, s3, s4, s5];
+  const complete = allScores.every((x) => x !== null);
+  const total = complete ? allScores.reduce((a, b) => a + b, 0) : null;
+  const category = complete ? classifyTotal(total) : null;
+
+  const countComplete = (id) => {
+    const d = draftMap[id];
+    if (!d) return 0;
+    return [d.lari60_detik, d.gantung_raw, d.situp_reps, d.loncat_cm, d.lari_jauh_detik].filter((x) => x !== null && x !== undefined).length;
+  };
+
+  const sendToNilaiPraktik = async () => {
+    if (!complete || !studentId) return;
+    setSending(true);
+    const mmssLabel = `${form.lariMenit || 0}'${String(form.lariDetik || 0).padStart(2, "0")}"`;
+    const note = `Tes Kebugaran (TKJI): Lari 60m ${form.lari60}dtk (nilai ${s1}), ${gantungLabel(gender)} ${form.gantung} (nilai ${s2}), Baring Duduk ${form.situp}x (nilai ${s3}), Loncat Tegak ${form.loncat}cm (nilai ${s4}), ${lariJauhLabel(gender)} ${mmssLabel} (nilai ${s5}). Total ${total} = ${category}.`;
+    const row = { id: genId(), student_id: studentId, guru_id: profile.id, subject: profile.subject, date: todayStr(), score: totalToScale100(total), note };
+    const { error, offline } = await offlineWrite("practice_scores", "insert", row);
+    if (error) { setSending(false); return notify("Gagal: " + error.message); }
+    await offlineWrite("fitness_tests", "delete", null, { match: { student_id: studentId } });
+    setDraftMap((m) => { const next = { ...m }; delete next[studentId]; return next; });
+    setForm(emptyForm);
+    setSending(false);
+    notify(offline ? "Tersimpan offline, akan disinkron & masuk ke Nilai Harian otomatis." : `Hasil TKJI (${category}) sudah masuk ke Nilai Harian.`);
+  };
+
+  const NumField = ({ label, value, onChange, onBlur, scoreVal, placeholder }) => (
+    <div>
+      <div className="flex items-center justify-between mb-1">
+        <label className="text-xs font-semibold" style={{ color: MUTED }}>{label}</label>
+        {scoreVal !== null && <span className="text-xs font-bold px-2 py-0.5 rounded-full text-white" style={{ background: NAVY }}>Nilai {scoreVal}</span>}
+      </div>
+      <input type="number" value={value} onChange={onChange} onBlur={onBlur} placeholder={placeholder}
+        className="text-sm px-3 py-2 rounded-lg w-full" style={{ background: BG, color: INK }} />
+    </div>
+  );
+
+  return (
+    <div>
+      <PageHeader eyebrow="Guru Mapel" title="Tes Kebugaran (TKJI)" right={<ClassPicker classes={classes} value={activeClassId} onChange={setActiveClassId} />} />
+      <div className="text-xs mb-4" style={{ color: MUTED }}>
+        Norma TKJI usia 16-19 tahun. Isi angka mentah tiap item (boleh di hari berbeda-beda) — nilai & kategori
+        dihitung otomatis. Kalau ke-5 item sudah lengkap, klik "Kirim ke Nilai Harian" untuk mengubahnya jadi satu
+        nilai praktik dan mengosongkan draft ini lagi untuk putaran tes berikutnya.
+      </div>
+      {students.length === 0 ? (
+        <Card><EmptyState icon={Users} text="Belum ada siswa di kelas ini." /></Card>
+      ) : (
+        <div className="flex flex-col md:flex-row gap-5">
+          <Card className="md:w-64 shrink-0" style={{ padding: 0 }}>
+            <div className="px-4 pt-4 pb-2 text-sm font-bold" style={{ color: INK }}>Daftar Siswa</div>
+            <div className="flex flex-col divide-y max-h-[70vh] overflow-y-auto" style={{ borderColor: "#EEF0F3" }}>
+              {students.map((s) => (
+                <button key={s.id} onClick={() => setStudentId(s.id)}
+                  className="w-full text-left px-4 py-2.5 text-sm flex items-center justify-between gap-2">
+                  <span style={{ color: INK, fontWeight: studentId === s.id ? 700 : 500 }}>{s.name}</span>
+                  <span className="text-xs shrink-0" style={{ color: countComplete(s.id) === 5 ? GREEN : MUTED }}>{countComplete(s.id)}/5</span>
+                </button>
+              ))}
+            </div>
+          </Card>
+          <Card className="flex-1">
+            <div className="text-sm font-bold mb-1" style={{ color: INK }}>{student?.name || "—"}</div>
+            <div className="text-xs mb-4" style={{ color: MUTED }}>Jenis kelamin: {gender === "L" ? "Laki-laki" : "Perempuan"}</div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <NumField label="Lari 60 Meter (detik)" value={form.lari60} scoreVal={s1} placeholder="mis. 8.5"
+                onChange={(e) => setForm((f) => ({ ...f, lari60: e.target.value }))}
+                onBlur={() => saveDraft(form)} />
+              <NumField label={gantungLabel(gender)} value={form.gantung} scoreVal={s2} placeholder="mis. 12"
+                onChange={(e) => setForm((f) => ({ ...f, gantung: e.target.value }))}
+                onBlur={() => saveDraft(form)} />
+              <NumField label="Baring Duduk 60 Detik (kali)" value={form.situp} scoreVal={s3} placeholder="mis. 25"
+                onChange={(e) => setForm((f) => ({ ...f, situp: e.target.value }))}
+                onBlur={() => saveDraft(form)} />
+              <NumField label="Loncat Tegak (cm)" value={form.loncat} scoreVal={s4} placeholder="mis. 55"
+                onChange={(e) => setForm((f) => ({ ...f, loncat: e.target.value }))}
+                onBlur={() => saveDraft(form)} />
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs font-semibold" style={{ color: MUTED }}>{lariJauhLabel(gender)} (menit : detik)</label>
+                  {s5 !== null && <span className="text-xs font-bold px-2 py-0.5 rounded-full text-white" style={{ background: NAVY }}>Nilai {s5}</span>}
+                </div>
+                <div className="flex items-center gap-2">
+                  <input type="number" value={form.lariMenit} placeholder="mnt"
+                    onChange={(e) => setForm((f) => ({ ...f, lariMenit: e.target.value }))}
+                    onBlur={() => saveDraft(form)}
+                    className="text-sm px-3 py-2 rounded-lg w-full" style={{ background: BG, color: INK }} />
+                  <span style={{ color: MUTED }}>:</span>
+                  <input type="number" value={form.lariDetik} placeholder="dtk"
+                    onChange={(e) => setForm((f) => ({ ...f, lariDetik: e.target.value }))}
+                    onBlur={() => saveDraft(form)}
+                    className="text-sm px-3 py-2 rounded-lg w-full" style={{ background: BG, color: INK }} />
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-5 rounded-lg p-4 flex items-center justify-between gap-3 flex-wrap" style={{ background: complete ? "#E8F6EE" : BG }}>
+              <div>
+                {complete ? (
+                  <div className="text-sm font-bold" style={{ color: INK }}>Total {total} — Kategori: {category}</div>
+                ) : (
+                  <div className="text-xs" style={{ color: MUTED }}>Lengkapi ke-5 item dulu untuk melihat kategori & mengirim ke Nilai Harian.</div>
+                )}
+              </div>
+              <button onClick={sendToNilaiPraktik} disabled={!complete || sending}
+                className="px-4 py-2 rounded-lg text-sm font-semibold text-white shrink-0"
+                style={{ background: NAVY, opacity: (!complete || sending) ? 0.5 : 1 }}>
+                {sending ? "Mengirim…" : "Kirim ke Nilai Harian"}
+              </button>
+            </div>
+          </Card>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PraktekTab({ profile, classes, activeClassId, setActiveClassId, students, notify }) {
   const [date, setDate] = useState(todayStr());
   const [materi, setMateri] = useState("");
