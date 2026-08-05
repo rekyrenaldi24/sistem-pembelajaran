@@ -475,7 +475,7 @@ function BiodataTab({ profile, classes, activeClassId, setActiveClassId, student
   // ---------- Isi Biodata (baru dimuat SETELAH unlocked = true) ----------
   const [studentId, setStudentId] = useState("");
   const [profilesMap, setProfilesMap] = useState({});
-  const emptyForm = { address: "", parent_phone: "", family_background: "", economic_notes: "", other_notes: "" };
+  const emptyForm = { address: "", parent_phone: "", family_background: "", economic_notes: "", violation_notes: "", achievement_notes: "", other_notes: "" };
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
 
@@ -509,6 +509,8 @@ function BiodataTab({ profile, classes, activeClassId, setActiveClassId, student
       parent_phone: p.parent_phone || "",
       family_background: p.family_background || "",
       economic_notes: p.economic_notes || "",
+      violation_notes: p.violation_notes || "",
+      achievement_notes: p.achievement_notes || "",
       other_notes: p.other_notes || "",
     } : emptyForm);
   }, [studentId, profilesMap]); // eslint-disable-line
@@ -531,7 +533,7 @@ function BiodataTab({ profile, classes, activeClassId, setActiveClassId, student
   const studentName = (id) => students.find((s) => s.id === id)?.name || "—";
   const hasData = (id) => {
     const p = profilesMap[id];
-    return !!(p && (p.address || p.parent_phone || p.family_background || p.economic_notes || p.other_notes));
+    return !!(p && (p.address || p.parent_phone || p.family_background || p.economic_notes || p.violation_notes || p.achievement_notes || p.other_notes));
   };
 
   // ---------- Render: masih cek status kunci ----------
@@ -638,6 +640,12 @@ function BiodataTab({ profile, classes, activeClassId, setActiveClassId, student
               <Field label="Kondisi Ekonomi" value={form.economic_notes} textarea rows={2}
                 placeholder="mis. penerima KIP/PIP, kurang mampu, dsb."
                 onChange={(e) => setForm((f) => ({ ...f, economic_notes: e.target.value }))} />
+              <Field label="Catatan Pelanggaran" value={form.violation_notes} textarea rows={3}
+                placeholder="mis. tanggal & jenis pelanggaran, tindak lanjut yang sudah dilakukan, dsb."
+                onChange={(e) => setForm((f) => ({ ...f, violation_notes: e.target.value }))} />
+              <Field label="Catatan Prestasi" value={form.achievement_notes} textarea rows={3}
+                placeholder="mis. juara lomba, prestasi akademik/non-akademik, dsb."
+                onChange={(e) => setForm((f) => ({ ...f, achievement_notes: e.target.value }))} />
               <Field label="Catatan Lain" value={form.other_notes} textarea rows={3}
                 placeholder="Catatan tambahan lainnya"
                 onChange={(e) => setForm((f) => ({ ...f, other_notes: e.target.value }))} />
