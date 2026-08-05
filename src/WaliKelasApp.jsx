@@ -2,17 +2,18 @@ import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { supabase } from "./supabaseClient.js";
 import {
   NAVY, NAVY2, ORANGE, BG, INK, MUTED, GREEN, RED, AMBER,
-  ATT_STATUSES, todayStr, exportToExcel, downloadStudentTemplate, parseStudentsExcel,
+  ATT_STATUSES, todayStr, exportToExcel, downloadStudentTemplate, parseStudentsExcel, sha256Hex,
   PageHeader, Card, EmptyState, ClassPicker, Toast,
 } from "./shared.jsx";
 import {
-  CalendarCheck, StickyNote, PiggyBank, Users, LogOut, Plus, Trash2, Download, Wallet, Pencil, Repeat, FileDown, Upload, History,
+  CalendarCheck, StickyNote, PiggyBank, Users, LogOut, Plus, Trash2, Download, Wallet, Pencil, Repeat, FileDown, Upload, History, ClipboardList, Save, Lock,
 } from "lucide-react";
 import AuditLogTab from "./AuditLog.jsx";
 
 const NAV = [
   { key: "absensi", label: "Absensi Kelas", icon: CalendarCheck },
   { key: "catatan", label: "Catatan", icon: StickyNote },
+  { key: "biodata", label: "Biodata Siswa", icon: ClipboardList },
   { key: "tabungan", label: "Tabungan", icon: PiggyBank },
   { key: "siswa", label: "Kelas & Siswa", icon: Users },
   { key: "riwayat", label: "Riwayat Aktivitas", icon: History },
@@ -110,6 +111,7 @@ export default function WaliKelasApp({ profile, onLogout, onSwitchRole }) {
         )}
         {tab === "absensi" && <AbsensiTab profile={profile} classes={classes} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} notify={notify} activeClass={activeClass} />}
         {tab === "catatan" && <CatatanTab profile={profile} classes={classes} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} notify={notify} />}
+        {tab === "biodata" && <BiodataTab profile={profile} classes={classes} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} notify={notify} />}
         {tab === "tabungan" && <TabunganTab profile={profile} classes={classes} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} notify={notify} activeClass={activeClass} />}
         {tab === "siswa" && <SiswaTab profile={profile} classes={classes} reloadClasses={loadClasses} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} setStudents={setStudents} notify={notify} />}
         {tab === "riwayat" && <AuditLogTab profile={profile} />}
@@ -369,6 +371,241 @@ function CatatanTab({ profile, classes, activeClassId, setActiveClassId, student
           </div>
         )}
       </Card>
+    </div>
+  );
+}
+
+// ================= BIODATA SISWA =================
+function BiodataTab({ profile, classes, activeClassId, setActiveClassId, students, notify }) {
+  // ---------- Gerbang password (memisahkan Biodata dari tab lain) ----------
+  const [checkingLock, setCheckingLock] = useState(true);
+  const [lockRow, setLockRow] = useState(null); // null = belum pernah buat password
+  const [unlocked, setUnlocked] = useState(false);
+  const [pinA, setPinA] = useState("");
+  const [pinB, setPinB] = useState("");
+  const [lockError, setLockError] = useState("");
+  const [lockBusy, setLockBusy] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      setCheckingLock(true);
+      const { data } = await supabase.from("biodata_lock").select("*").eq("wali_kelas_id", profile.id).maybeSingle();
+      setLockRow(data || null);
+      setCheckingLock(false);
+    })();
+  }, [profile.id]);
+
+  const createPin = async () => {
+    setLockError("");
+    if (pinA.length < 4) return setLockError("Password minimal 4 karakter.");
+    if (pinA !== pinB) return setLockError("Konfirmasi password tidak sama.");
+    setLockBusy(true);
+    const hash = await sha256Hex(pinA);
+    const { error } = await supabase.from("biodata_lock").upsert({
+      wali_kelas_id: profile.id, pin_hash: hash, updated_at: new Date().toISOString(),
+    }, { onConflict: "wali_kelas_id" });
+    setLockBusy(false);
+    if (error) return setLockError("Gagal menyimpan password: " + error.message);
+    setLockRow({ wali_kelas_id: profile.id, pin_hash: hash });
+    setUnlocked(true);
+    setPinA(""); setPinB("");
+    notify("Password Biodata Siswa berhasil dibuat.");
+  };
+
+  const tryUnlock = async () => {
+    setLockError("");
+    setLockBusy(true);
+    const hash = await sha256Hex(pinA);
+    setLockBusy(false);
+    if (hash === lockRow.pin_hash) {
+      setUnlocked(true);
+      setPinA("");
+    } else {
+      setLockError("Password salah.");
+      setPinA("");
+    }
+  };
+
+  // ---------- Isi Biodata (baru dimuat SETELAH unlocked = true) ----------
+  const [studentId, setStudentId] = useState("");
+  const [profilesMap, setProfilesMap] = useState({});
+  const emptyForm = { address: "", parent_phone: "", family_background: "", economic_notes: "", other_notes: "" };
+  const [form, setForm] = useState(emptyForm);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => { setStudentId(students[0]?.id || ""); }, [students]);
+
+  const loadProfiles = useCallback(async () => {
+    if (!students.length) { setProfilesMap({}); return; }
+    const { data } = await supabase.from("student_profiles").select("*").in("student_id", students.map((s) => s.id));
+    const map = {};
+    (data || []).forEach((p) => { map[p.student_id] = p; });
+    setProfilesMap(map);
+  }, [students]);
+
+  useEffect(() => { if (unlocked) loadProfiles(); }, [unlocked, loadProfiles]);
+
+  useEffect(() => {
+    const p = profilesMap[studentId];
+    setForm(p ? {
+      address: p.address || "",
+      parent_phone: p.parent_phone || "",
+      family_background: p.family_background || "",
+      economic_notes: p.economic_notes || "",
+      other_notes: p.other_notes || "",
+    } : emptyForm);
+  }, [studentId, profilesMap]); // eslint-disable-line
+
+  const saveProfile = async () => {
+    if (!studentId) return;
+    setSaving(true);
+    const { error } = await supabase.from("student_profiles").upsert({
+      student_id: studentId,
+      wali_kelas_id: profile.id,
+      ...form,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "student_id" });
+    setSaving(false);
+    if (error) return notify("Gagal: " + error.message);
+    loadProfiles();
+    notify("Biodata tersimpan.");
+  };
+
+  const studentName = (id) => students.find((s) => s.id === id)?.name || "—";
+  const hasData = (id) => {
+    const p = profilesMap[id];
+    return !!(p && (p.address || p.parent_phone || p.family_background || p.economic_notes || p.other_notes));
+  };
+
+  const Field = ({ label, value, onChange, placeholder, textarea, rows }) => (
+    <div>
+      <label className="text-xs font-semibold block mb-1" style={{ color: MUTED }}>{label}</label>
+      {textarea ? (
+        <textarea value={value} onChange={onChange} rows={rows || 3} placeholder={placeholder}
+          className="text-sm px-3 py-2 rounded-lg w-full resize-y" style={{ background: BG, color: INK }} />
+      ) : (
+        <input value={value} onChange={onChange} placeholder={placeholder}
+          className="text-sm px-3 py-2 rounded-lg w-full" style={{ background: BG, color: INK }} />
+      )}
+    </div>
+  );
+
+  // ---------- Render: masih cek status kunci ----------
+  if (checkingLock) {
+    return (
+      <div>
+        <PageHeader eyebrow="Wali Kelas" title="Biodata Siswa" />
+        <Card><div className="text-sm py-6 text-center" style={{ color: MUTED }}>Memuat…</div></Card>
+      </div>
+    );
+  }
+
+  // ---------- Render: belum pernah buat password → suruh buat dulu ----------
+  if (!lockRow) {
+    return (
+      <div>
+        <PageHeader eyebrow="Wali Kelas" title="Biodata Siswa" />
+        <Card className="max-w-md mx-auto text-center">
+          <Lock size={28} className="mx-auto mb-3" style={{ color: ORANGE }} />
+          <div className="text-sm font-bold mb-1" style={{ color: INK }}>Buat Password Biodata Siswa</div>
+          <div className="text-xs mb-4" style={{ color: MUTED }}>
+            Menu ini berisi data pribadi siswa (latar belakang keluarga, kondisi ekonomi, dll).
+            Buat password supaya hanya Anda yang bisa membukanya — misalnya kalau HP/laptop ini
+            juga dipakai sekretaris atau bendahara kelas untuk isi absen dan tabungan.
+          </div>
+          <div className="flex flex-col gap-2 text-left">
+            <input type="password" value={pinA} onChange={(e) => setPinA(e.target.value)} placeholder="Buat password (min. 4 karakter)"
+              className="text-sm px-3 py-2 rounded-lg w-full" style={{ background: BG, color: INK }} />
+            <input type="password" value={pinB} onChange={(e) => setPinB(e.target.value)} placeholder="Ulangi password"
+              className="text-sm px-3 py-2 rounded-lg w-full" style={{ background: BG, color: INK }}
+              onKeyDown={(e) => e.key === "Enter" && createPin()} />
+          </div>
+          {lockError && <div className="text-xs mt-2" style={{ color: RED }}>{lockError}</div>}
+          <button onClick={createPin} disabled={lockBusy}
+            className="mt-4 w-full px-4 py-2 rounded-lg text-sm font-semibold text-white"
+            style={{ background: NAVY, opacity: lockBusy ? 0.6 : 1 }}>
+            {lockBusy ? "Menyimpan…" : "Simpan Password"}
+          </button>
+        </Card>
+      </div>
+    );
+  }
+
+  // ---------- Render: sudah ada password tapi belum dibuka ----------
+  if (!unlocked) {
+    return (
+      <div>
+        <PageHeader eyebrow="Wali Kelas" title="Biodata Siswa" />
+        <Card className="max-w-md mx-auto text-center">
+          <Lock size={28} className="mx-auto mb-3" style={{ color: ORANGE }} />
+          <div className="text-sm font-bold mb-1" style={{ color: INK }}>Menu Terkunci</div>
+          <div className="text-xs mb-4" style={{ color: MUTED }}>Masukkan password untuk membuka Biodata Siswa.</div>
+          <input type="password" autoFocus value={pinA} onChange={(e) => setPinA(e.target.value)} placeholder="Password"
+            className="text-sm px-3 py-2 rounded-lg w-full" style={{ background: BG, color: INK }}
+            onKeyDown={(e) => e.key === "Enter" && tryUnlock()} />
+          {lockError && <div className="text-xs mt-2" style={{ color: RED }}>{lockError}</div>}
+          <button onClick={tryUnlock} disabled={lockBusy}
+            className="mt-4 w-full px-4 py-2 rounded-lg text-sm font-semibold text-white"
+            style={{ background: NAVY, opacity: lockBusy ? 0.6 : 1 }}>
+            {lockBusy ? "Memeriksa…" : "Buka"}
+          </button>
+          <div className="text-xs mt-3" style={{ color: MUTED }}>
+            Lupa password? Buka Supabase → Table Editor → tabel "biodata_lock" → hapus baris milik akun Anda,
+            lalu buka menu ini lagi untuk buat password baru.
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
+  // ---------- Render: sudah terbuka → tampilkan biodata seperti biasa ----------
+  return (
+    <div>
+      <PageHeader eyebrow="Wali Kelas" title="Biodata Siswa" right={<ClassPicker classes={classes} value={activeClassId} onChange={setActiveClassId} />} />
+      <div className="text-xs mb-4" style={{ color: MUTED }}>
+        Data ini bersifat privat, hanya bisa dilihat dan diubah oleh Anda sebagai wali kelas siswa tersebut.
+      </div>
+      {students.length === 0 ? (
+        <Card><EmptyState icon={Users} text="Belum ada siswa di kelas ini." /></Card>
+      ) : (
+        <div className="flex flex-col md:flex-row gap-5">
+          <Card className="md:w-64 shrink-0" style={{ padding: 0 }}>
+            <div className="px-4 pt-4 pb-2 text-sm font-bold" style={{ color: INK }}>Daftar Siswa</div>
+            <div className="flex flex-col divide-y max-h-[70vh] overflow-y-auto" style={{ borderColor: "#EEF0F3" }}>
+              {students.map((s) => (
+                <button key={s.id} onClick={() => setStudentId(s.id)}
+                  className="w-full text-left px-4 py-2.5 text-sm flex items-center justify-between gap-2">
+                  <span style={{ color: INK, fontWeight: studentId === s.id ? 700 : 500 }}>{s.name}</span>
+                  {hasData(s.id) && <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: GREEN }} title="Sudah ada biodata" />}
+                </button>
+              ))}
+            </div>
+          </Card>
+          <Card className="flex-1">
+            <div className="text-sm font-bold mb-4" style={{ color: INK }}>Biodata — {studentName(studentId)}</div>
+            <div className="flex flex-col gap-3">
+              <Field label="Alamat" value={form.address} placeholder="Alamat rumah siswa"
+                onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))} />
+              <Field label="Nomor WA Orang Tua / Wali" value={form.parent_phone} placeholder="mis. 081234567890"
+                onChange={(e) => setForm((f) => ({ ...f, parent_phone: e.target.value }))} />
+              <Field label="Latar Belakang Keluarga" value={form.family_background} textarea rows={3}
+                placeholder="mis. tinggal bersama nenek, orang tua bercerai, anak tunggal, dsb."
+                onChange={(e) => setForm((f) => ({ ...f, family_background: e.target.value }))} />
+              <Field label="Kondisi Ekonomi" value={form.economic_notes} textarea rows={2}
+                placeholder="mis. penerima KIP/PIP, kurang mampu, dsb."
+                onChange={(e) => setForm((f) => ({ ...f, economic_notes: e.target.value }))} />
+              <Field label="Catatan Lain" value={form.other_notes} textarea rows={3}
+                placeholder="Catatan tambahan lainnya"
+                onChange={(e) => setForm((f) => ({ ...f, other_notes: e.target.value }))} />
+              <button onClick={saveProfile} disabled={saving}
+                className="self-start px-4 py-2 rounded-lg text-sm font-semibold text-white flex items-center gap-1.5"
+                style={{ background: NAVY, opacity: saving ? 0.6 : 1 }}>
+                <Save size={14} /> {saving ? "Menyimpan…" : "Simpan Biodata"}
+              </button>
+            </div>
+          </Card>
+        </div>
+      )}
     </div>
   );
 }
