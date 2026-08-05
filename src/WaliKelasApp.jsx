@@ -376,6 +376,24 @@ function CatatanTab({ profile, classes, activeClassId, setActiveClassId, student
 }
 
 // ================= BIODATA SISWA =================
+// Didefinisikan di luar BiodataTab (bukan di dalamnya) — supaya React tidak
+// menganggapnya komponen baru tiap kali render, yang menyebabkan input
+// kehilangan fokus setiap kali mengetik satu huruf.
+function Field({ label, value, onChange, placeholder, textarea, rows }) {
+  return (
+    <div>
+      <label className="text-xs font-semibold block mb-1" style={{ color: MUTED }}>{label}</label>
+      {textarea ? (
+        <textarea value={value} onChange={onChange} rows={rows || 3} placeholder={placeholder}
+          className="text-sm px-3 py-2 rounded-lg w-full resize-y" style={{ background: BG, color: INK }} />
+      ) : (
+        <input value={value} onChange={onChange} placeholder={placeholder}
+          className="text-sm px-3 py-2 rounded-lg w-full" style={{ background: BG, color: INK }} />
+      )}
+    </div>
+  );
+}
+
 function BiodataTab({ profile, classes, activeClassId, setActiveClassId, students, notify }) {
   // ---------- Gerbang password (memisahkan Biodata dari tab lain) ----------
   const [checkingLock, setCheckingLock] = useState(true);
@@ -476,19 +494,6 @@ function BiodataTab({ profile, classes, activeClassId, setActiveClassId, student
     const p = profilesMap[id];
     return !!(p && (p.address || p.parent_phone || p.family_background || p.economic_notes || p.other_notes));
   };
-
-  const Field = ({ label, value, onChange, placeholder, textarea, rows }) => (
-    <div>
-      <label className="text-xs font-semibold block mb-1" style={{ color: MUTED }}>{label}</label>
-      {textarea ? (
-        <textarea value={value} onChange={onChange} rows={rows || 3} placeholder={placeholder}
-          className="text-sm px-3 py-2 rounded-lg w-full resize-y" style={{ background: BG, color: INK }} />
-      ) : (
-        <input value={value} onChange={onChange} placeholder={placeholder}
-          className="text-sm px-3 py-2 rounded-lg w-full" style={{ background: BG, color: INK }} />
-      )}
-    </div>
-  );
 
   // ---------- Render: masih cek status kunci ----------
   if (checkingLock) {
