@@ -1062,3 +1062,23 @@ function SiswaTab({ profile, classes, setClasses, reloadClasses, activeClassId, 
           <button onClick={addStudent} className="px-3.5 py-2 rounded-lg text-sm font-semibold text-white flex items-center gap-1.5" style={{ background: ORANGE }}><Plus size={14} /> Tambah</button>
         </div>
         {students.length === 0 ? <EmptyState icon={Users} text="Belum ada siswa di kelas ini." /> : (
+          <div className="flex flex-col divide-y" style={{ borderColor: "#EEF0F3" }}>
+            {students.map((s) => (
+              <div key={s.id} className="flex items-center justify-between py-2.5">
+                <span className="text-sm" style={{ color: INK }}>{s.name}</span>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => toggleGender(s)} className="text-xs font-bold px-2 py-1 rounded-md"
+                    style={{ background: s.gender === "P" ? "#FBEAF2" : "#EAF1FB", color: s.gender === "P" ? "#C23B78" : "#2B5FB8" }}
+                    title="Klik untuk ubah">
+                    {s.gender || "?"}
+                  </button>
+                  <button onClick={() => removeStudent(s.id)} className="w-8 h-8 rounded-md flex items-center justify-center" style={{ background: "#FBEAEC" }}><Trash2 size={13} color={RED} /></button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
