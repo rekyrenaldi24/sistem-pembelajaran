@@ -3,8 +3,9 @@ import { supabase } from "./supabaseClient.js";
 import {
   NAVY, NAVY2, ORANGE, BG, INK, MUTED, GREEN, RED, AMBER,
   ATT_STATUSES, todayStr, exportToExcel, downloadStudentTemplate, parseStudentsExcel, sha256Hex,
-  PageHeader, Card, EmptyState, ClassPicker, Toast,
+  PageHeader, Card, EmptyState, ClassPicker, Toast, OfflineBanner, useOfflineStatus,
 } from "./shared.jsx";
+import { offlineWrite, genId } from "./offlineSync.js";
 import {
   CalendarCheck, StickyNote, PiggyBank, Users, LogOut, Plus, Trash2, Download, Wallet, Pencil, Repeat, FileDown, Upload, History, ClipboardList, Save, Lock,
 } from "lucide-react";
@@ -29,6 +30,7 @@ export default function WaliKelasApp({ profile, onLogout, onSwitchRole }) {
   const [toast, setToast] = useState("");
 
   const notify = (msg) => { setToast(msg); setTimeout(() => setToast(""), 2500); };
+  const { pending, offline, syncNow } = useOfflineStatus(notify);
 
   const loadClasses = useCallback(async () => {
     const { data } = await supabase.from("classes").select("*").order("name");
@@ -51,9 +53,10 @@ export default function WaliKelasApp({ profile, onLogout, onSwitchRole }) {
 
   const claimClass = async () => {
     if (!activeClassId) return;
-    const { error } = await supabase.from("classes").update({ wali_kelas_id: profile.id }).eq("id", activeClassId);
+    const { error, offline: isOff } = await offlineWrite("classes", "update", { wali_kelas_id: profile.id }, { match: { id: activeClassId } });
     if (error) return notify("Gagal: " + error.message);
-    loadClasses(); notify("Kelas ini sekarang di bawah perwalian Anda.");
+    setClasses((prev) => prev.map((c) => c.id === activeClassId ? { ...c, wali_kelas_id: profile.id } : c));
+    notify(isOff ? "Tersimpan offline, akan disinkron otomatis." : "Kelas ini sekarang di bawah perwalian Anda.");
   };
 
   const activeClass = classes.find((c) => c.id === activeClassId);
@@ -103,6 +106,7 @@ export default function WaliKelasApp({ profile, onLogout, onSwitchRole }) {
       </aside>
 
       <main className="flex-1 min-w-0 p-5 md:p-8">
+        <OfflineBanner offline={offline} pending={pending} onSyncNow={syncNow} />
         {activeClass && activeClass.wali_kelas_id !== profile.id && (
           <div className="mb-5 flex items-center justify-between flex-wrap gap-2 px-4 py-3 rounded-lg text-sm" style={{ background: "#FFF4EE", color: "#9A4A22" }}>
             <span>Kelas ini belum punya wali kelas resmi di sistem.</span>
@@ -113,7 +117,7 @@ export default function WaliKelasApp({ profile, onLogout, onSwitchRole }) {
         {tab === "catatan" && <CatatanTab profile={profile} classes={classes} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} notify={notify} />}
         {tab === "biodata" && <BiodataTab profile={profile} classes={classes} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} notify={notify} />}
         {tab === "tabungan" && <TabunganTab profile={profile} classes={classes} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} notify={notify} activeClass={activeClass} />}
-        {tab === "siswa" && <SiswaTab profile={profile} classes={classes} reloadClasses={loadClasses} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} setStudents={setStudents} notify={notify} />}
+        {tab === "siswa" && <SiswaTab profile={profile} classes={classes} setClasses={setClasses} reloadClasses={loadClasses} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} setStudents={setStudents} notify={notify} />}
         {tab === "riwayat" && <AuditLogTab profile={profile} />}
       </main>
       <Toast message={toast} onClose={() => setToast("")} />
@@ -154,37 +158,43 @@ function AbsensiTab({ profile, classes, activeClassId, setActiveClassId, student
     const isUndo = record[studentId] === status;
     if (isUndo) {
       setRecord((r) => { const next = { ...r }; delete next[studentId]; return next; });
-      const { error } = await supabase.from("homeroom_attendance").delete()
-        .eq("student_id", studentId).eq("wali_kelas_id", profile.id).eq("date", date);
+      const { error, offline } = await offlineWrite("homeroom_attendance", "delete", null, {
+        match: { student_id: studentId, wali_kelas_id: profile.id, date },
+      });
       if (error) notify("Gagal: " + error.message);
+      else if (offline) notify("Tersimpan offline, akan disinkron otomatis.");
       loadRecap();
       return;
     }
     setRecord((r) => ({ ...r, [studentId]: status }));
-    const { error } = await supabase.from("homeroom_attendance").upsert(
+    const { error, offline } = await offlineWrite(
+      "homeroom_attendance", "upsert",
       { student_id: studentId, wali_kelas_id: profile.id, date, status },
       { onConflict: "student_id,date" }
     );
     if (error) notify("Gagal: " + error.message);
+    else if (offline) notify("Tersimpan offline, akan disinkron otomatis.");
     loadRecap();
   };
   const markAll = async (status) => {
     const rows = students.map((s) => ({ student_id: s.id, wali_kelas_id: profile.id, date, status }));
-    const { error } = await supabase.from("homeroom_attendance").upsert(rows, { onConflict: "student_id,date" });
+    const { error, offline } = await offlineWrite("homeroom_attendance", "upsert", rows, { onConflict: "student_id,date" });
     if (error) return notify("Gagal: " + error.message);
     const rec = {}; students.forEach((s) => { rec[s.id] = status; });
     setRecord(rec);
     loadRecap();
+    if (offline) notify("Tersimpan offline, akan disinkron otomatis.");
   };
   const clearAll = async () => {
     if (!confirm(`Hapus semua tanda absensi tanggal ${date} untuk kelas ini?`)) return;
-    const { error } = await supabase.from("homeroom_attendance").delete()
-      .eq("wali_kelas_id", profile.id).eq("date", date)
-      .in("student_id", students.map((s) => s.id));
+    const { error, offline } = await offlineWrite("homeroom_attendance", "delete", null, {
+      match: { wali_kelas_id: profile.id, date },
+      inFilter: { column: "student_id", values: students.map((s) => s.id) },
+    });
     if (error) return notify("Gagal: " + error.message);
     setRecord({});
     loadRecap();
-    notify("Semua tanda absensi tanggal itu sudah dihapus.");
+    notify(offline ? "Tersimpan offline, akan disinkron otomatis." : "Semua tanda absensi tanggal itu sudah dihapus.");
   };
 
   const recapRows = useMemo(() => students.map((s) => {
@@ -333,11 +343,17 @@ function CatatanTab({ profile, classes, activeClassId, setActiveClassId, student
 
   const addNote = async () => {
     if (!studentId || !content.trim()) return;
-    const { error } = await supabase.from("notes").insert({ student_id: studentId, wali_kelas_id: profile.id, content: content.trim(), date: eventDate });
+    const row = { id: genId(), student_id: studentId, wali_kelas_id: profile.id, content: content.trim(), date: eventDate };
+    const { error, offline } = await offlineWrite("notes", "insert", row);
     if (error) return notify("Gagal: " + error.message);
-    setContent(""); loadNotes(); notify("Catatan tersimpan.");
+    setNotes((n) => [row, ...n]);
+    setContent("");
+    notify(offline ? "Tersimpan offline, akan disinkron otomatis." : "Catatan tersimpan.");
   };
-  const removeNote = async (id) => { await supabase.from("notes").delete().eq("id", id); loadNotes(); };
+  const removeNote = async (id) => {
+    setNotes((n) => n.filter((x) => x.id !== id));
+    await offlineWrite("notes", "delete", null, { match: { id } });
+  };
   const studentName = (id) => students.find((s) => s.id === id)?.name || "—";
 
   return (
@@ -407,8 +423,20 @@ function BiodataTab({ profile, classes, activeClassId, setActiveClassId, student
   useEffect(() => {
     (async () => {
       setCheckingLock(true);
-      const { data } = await supabase.from("biodata_lock").select("*").eq("wali_kelas_id", profile.id).maybeSingle();
-      setLockRow(data || null);
+      const cacheKey = `r3edu_lock_cache_${profile.id}`;
+      try {
+        const { data, error } = await supabase.from("biodata_lock").select("*").eq("wali_kelas_id", profile.id).maybeSingle();
+        if (error) throw error;
+        setLockRow(data || null);
+        try { localStorage.setItem(cacheKey, JSON.stringify(data || null)); } catch { /* abaikan */ }
+      } catch (e) {
+        // offline / gagal jaringan -> pakai status kunci yang tersimpan
+        // terakhir kali berhasil online, supaya menu tetap bisa dibuka.
+        try {
+          const cached = localStorage.getItem(cacheKey);
+          setLockRow(cached ? JSON.parse(cached) : null);
+        } catch { setLockRow(null); }
+      }
       setCheckingLock(false);
     })();
   }, [profile.id]);
@@ -419,15 +447,15 @@ function BiodataTab({ profile, classes, activeClassId, setActiveClassId, student
     if (pinA !== pinB) return setLockError("Konfirmasi password tidak sama.");
     setLockBusy(true);
     const hash = await sha256Hex(pinA);
-    const { error } = await supabase.from("biodata_lock").upsert({
-      wali_kelas_id: profile.id, pin_hash: hash, updated_at: new Date().toISOString(),
-    }, { onConflict: "wali_kelas_id" });
+    const row = { wali_kelas_id: profile.id, pin_hash: hash, updated_at: new Date().toISOString() };
+    const { error, offline } = await offlineWrite("biodata_lock", "upsert", row, { onConflict: "wali_kelas_id" });
     setLockBusy(false);
     if (error) return setLockError("Gagal menyimpan password: " + error.message);
-    setLockRow({ wali_kelas_id: profile.id, pin_hash: hash });
+    setLockRow(row);
+    try { localStorage.setItem(`r3edu_lock_cache_${profile.id}`, JSON.stringify(row)); } catch { /* abaikan */ }
     setUnlocked(true);
     setPinA(""); setPinB("");
-    notify("Password Biodata Siswa berhasil dibuat.");
+    notify(offline ? "Password tersimpan offline, akan disinkron otomatis." : "Password Biodata Siswa berhasil dibuat.");
   };
 
   const tryUnlock = async () => {
@@ -455,11 +483,22 @@ function BiodataTab({ profile, classes, activeClassId, setActiveClassId, student
 
   const loadProfiles = useCallback(async () => {
     if (!students.length) { setProfilesMap({}); return; }
-    const { data } = await supabase.from("student_profiles").select("*").in("student_id", students.map((s) => s.id));
-    const map = {};
-    (data || []).forEach((p) => { map[p.student_id] = p; });
-    setProfilesMap(map);
-  }, [students]);
+    const cacheKey = `r3edu_biodata_cache_${profile.id}`;
+    try {
+      const { data, error } = await supabase.from("student_profiles").select("*").in("student_id", students.map((s) => s.id));
+      if (error) throw error;
+      const map = {};
+      (data || []).forEach((p) => { map[p.student_id] = p; });
+      setProfilesMap(map);
+      try { localStorage.setItem(cacheKey, JSON.stringify(map)); } catch { /* abaikan */ }
+    } catch (e) {
+      // offline -> pakai data terakhir yang tersimpan di HP ini
+      try {
+        const cached = localStorage.getItem(cacheKey);
+        setProfilesMap(cached ? JSON.parse(cached) : {});
+      } catch { setProfilesMap({}); }
+    }
+  }, [students, profile.id]);
 
   useEffect(() => { if (unlocked) loadProfiles(); }, [unlocked, loadProfiles]);
 
@@ -477,16 +516,16 @@ function BiodataTab({ profile, classes, activeClassId, setActiveClassId, student
   const saveProfile = async () => {
     if (!studentId) return;
     setSaving(true);
-    const { error } = await supabase.from("student_profiles").upsert({
-      student_id: studentId,
-      wali_kelas_id: profile.id,
-      ...form,
-      updated_at: new Date().toISOString(),
-    }, { onConflict: "student_id" });
+    const row = { student_id: studentId, wali_kelas_id: profile.id, ...form, updated_at: new Date().toISOString() };
+    const { error, offline } = await offlineWrite("student_profiles", "upsert", row, { onConflict: "student_id" });
     setSaving(false);
     if (error) return notify("Gagal: " + error.message);
-    loadProfiles();
-    notify("Biodata tersimpan.");
+    setProfilesMap((m) => {
+      const next = { ...m, [studentId]: row };
+      try { localStorage.setItem(`r3edu_biodata_cache_${profile.id}`, JSON.stringify(next)); } catch { /* abaikan */ }
+      return next;
+    });
+    notify(offline ? "Biodata tersimpan offline, akan disinkron otomatis." : "Biodata tersimpan.");
   };
 
   const studentName = (id) => students.find((s) => s.id === id)?.name || "—";
@@ -640,13 +679,17 @@ function TabunganTab({ profile, classes, activeClassId, setActiveClassId, studen
 
   const addEntry = async () => {
     if (!studentId || !amount) return;
-    const { error } = await supabase.from("savings").insert({
-      student_id: studentId, wali_kelas_id: profile.id, type, category, amount: Number(amount), note: note.trim() || null, date: txDate,
-    });
+    const row = { id: genId(), student_id: studentId, wali_kelas_id: profile.id, type, category, amount: Number(amount), note: note.trim() || null, date: txDate };
+    const { error, offline } = await offlineWrite("savings", "insert", row);
     if (error) return notify("Gagal: " + error.message);
-    setAmount(""); setNote(""); loadLog(); notify("Transaksi tersimpan.");
+    setLog((l) => [...l, row]);
+    setAmount(""); setNote("");
+    notify(offline ? "Tersimpan offline, akan disinkron otomatis." : "Transaksi tersimpan.");
   };
-  const removeEntry = async (id) => { await supabase.from("savings").delete().eq("id", id); loadLog(); };
+  const removeEntry = async (id) => {
+    setLog((l) => l.filter((x) => x.id !== id));
+    await offlineWrite("savings", "delete", null, { match: { id } });
+  };
   const toggleExpand = (id) => setExpanded((e) => ({ ...e, [id]: !e[id] }));
 
   const saldo = (id) => log.filter((s) => s.student_id === id).reduce((sum, s) => sum + (s.type === "setor" ? Number(s.amount) : -Number(s.amount)), 0);
@@ -849,7 +892,7 @@ function TabunganTab({ profile, classes, activeClassId, setActiveClassId, studen
 }
 
 // ================= KELAS & SISWA =================
-function SiswaTab({ profile, classes, reloadClasses, activeClassId, setActiveClassId, students, setStudents, notify }) {
+function SiswaTab({ profile, classes, setClasses, reloadClasses, activeClassId, setActiveClassId, students, setStudents, notify }) {
   const [newClass, setNewClass] = useState("");
   const [name, setName] = useState("");
   const [gender, setGender] = useState("L");
@@ -859,41 +902,51 @@ function SiswaTab({ profile, classes, reloadClasses, activeClassId, setActiveCla
   const addClass = async () => {
     const c = newClass.trim();
     if (!c) return;
-    const { error } = await supabase.from("classes").insert({ name: c, owner_id: profile.id });
+    const row = { id: genId(), name: c, owner_id: profile.id };
+    const { error, offline } = await offlineWrite("classes", "insert", row);
     if (error) return notify("Gagal: " + error.message);
-    setNewClass(""); reloadClasses(); notify("Kelas ditambahkan.");
+    setClasses((prev) => [...prev, row].sort((a, b) => a.name.localeCompare(b.name)));
+    if (!activeClassId) setActiveClassId(row.id);
+    setNewClass("");
+    notify(offline ? "Kelas tersimpan offline, akan disinkron otomatis." : "Kelas ditambahkan.");
   };
 
   const startEditClass = (c) => { setEditingClassId(c.id); setEditingClassName(c.name); };
   const saveEditClass = async () => {
     const nm = editingClassName.trim();
     if (!nm) return;
-    const { error } = await supabase.from("classes").update({ name: nm }).eq("id", editingClassId);
+    const { error, offline } = await offlineWrite("classes", "update", { name: nm }, { match: { id: editingClassId } });
     if (error) return notify("Gagal: " + error.message);
-    setEditingClassId(null); reloadClasses(); notify("Nama kelas diperbarui.");
+    setClasses((prev) => prev.map((c) => c.id === editingClassId ? { ...c, name: nm } : c));
+    setEditingClassId(null);
+    notify(offline ? "Tersimpan offline, akan disinkron otomatis." : "Nama kelas diperbarui.");
   };
   const deleteClass = async (c) => {
     if (!confirm(`Hapus kelas "${c.name}"? Semua data siswa, absensi, catatan, dan tabungan di kelas ini akan ikut terhapus permanen.`)) return;
-    const { error } = await supabase.from("classes").delete().eq("id", c.id);
+    const { error, offline } = await offlineWrite("classes", "delete", null, { match: { id: c.id } });
     if (error) return notify("Gagal: " + error.message);
-    reloadClasses(); notify("Kelas dihapus.");
+    setClasses((prev) => prev.filter((x) => x.id !== c.id));
+    notify(offline ? "Tersimpan offline, akan disinkron otomatis." : "Kelas dihapus.");
   };
 
   const addStudent = async () => {
     if (!name.trim() || !activeClassId) return;
-    const { data, error } = await supabase.from("students").insert({ name: name.trim(), class_id: activeClassId, gender }).select().single();
+    const row = { id: genId(), name: name.trim(), class_id: activeClassId, gender };
+    const { error, offline } = await offlineWrite("students", "insert", row);
     if (error) return notify("Gagal: " + error.message);
-    setStudents((prev) => [...prev, data]); setName("");
+    setStudents((prev) => [...prev, row]);
+    setName("");
+    if (offline) notify("Siswa tersimpan offline, akan disinkron otomatis.");
   };
   const removeStudent = async (id) => {
-    await supabase.from("students").delete().eq("id", id);
     setStudents((prev) => prev.filter((s) => s.id !== id));
+    await offlineWrite("students", "delete", null, { match: { id } });
   };
   const toggleGender = async (s) => {
     const next = s.gender === "L" ? "P" : "L";
-    const { error } = await supabase.from("students").update({ gender: next }).eq("id", s.id);
-    if (error) return notify("Gagal: " + error.message);
     setStudents((prev) => prev.map((x) => x.id === s.id ? { ...x, gender: next } : x));
+    const { error } = await offlineWrite("students", "update", { gender: next }, { match: { id: s.id } });
+    if (error) notify("Gagal: " + error.message);
   };
 
   const [importing, setImporting] = useState(false);
@@ -906,12 +959,12 @@ function SiswaTab({ profile, classes, reloadClasses, activeClassId, setActiveCla
     try {
       const rows = await parseStudentsExcel(file);
       if (rows.length === 0) { notify("Tidak ada data siswa yang terbaca di file itu."); setImporting(false); return; }
-      const toInsert = rows.map((r) => ({ name: r.name, gender: r.gender, class_id: activeClassId }));
-      const { data, error } = await supabase.from("students").insert(toInsert).select();
+      const toInsert = rows.map((r) => ({ id: genId(), name: r.name, gender: r.gender, class_id: activeClassId }));
+      const { error, offline } = await offlineWrite("students", "insert", toInsert);
       if (error) { notify("Gagal impor: " + error.message); setImporting(false); return; }
-      setStudents((prev) => [...prev, ...data]);
+      setStudents((prev) => [...prev, ...toInsert]);
       const missingGender = rows.filter((r) => !r.gender).length;
-      notify(`${data.length} siswa berhasil diimpor.` + (missingGender ? ` (${missingGender} tanpa jenis kelamin, isi manual)` : ""));
+      notify(`${toInsert.length} siswa ${offline ? "tersimpan offline (akan disinkron otomatis)" : "berhasil diimpor"}.` + (missingGender ? ` (${missingGender} tanpa jenis kelamin, isi manual)` : ""));
     } catch (err) {
       notify("Gagal membaca file: " + err.message);
     }
