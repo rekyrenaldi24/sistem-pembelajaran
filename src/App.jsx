@@ -4,6 +4,7 @@ import Auth from "./Auth.jsx";
 import ResetPassword from "./ResetPassword.jsx";
 import GuruApp from "./GuruApp.jsx";
 import WaliKelasApp from "./WaliKelasApp.jsx";
+import BiodataFormPublic from "./BiodataFormPublic.jsx";
 import { NAVY, NAVY2, ORANGE, BG, MUTED } from "./shared.jsx";
 import { Loader2, LogOut, Clock, GraduationCap, Users2 } from "lucide-react";
 
@@ -31,6 +32,14 @@ export default function App() {
   }, [session]);
 
   useEffect(() => { setActiveRole(null); }, [session?.user?.id]);
+
+  // Halaman formulir biodata untuk SISWA (tanpa login) — kalau URL-nya
+  // ada ?isi_biodata=<id kelas>, langsung tampilkan formulir itu saja,
+  // jangan lewat proses login sama sekali.
+  const biodataClassId = new URLSearchParams(window.location.search).get("isi_biodata");
+  if (biodataClassId) {
+    return <BiodataFormPublic classId={biodataClassId} />;
+  }
 
   if (recoveryMode) {
     return <ResetPassword onDone={() => setRecoveryMode(false)} />;
