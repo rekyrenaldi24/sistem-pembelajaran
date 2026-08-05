@@ -1,5 +1,6 @@
-import React from "react";
+import React, { useState, useEffect } from "react";
 import * as XLSX from "xlsx";
+import { subscribePending, initAutoSync, syncNow } from "./offlineSync.js";
 
 // ---------- Brand tokens ----------
 export const NAVY = "#16233F";
@@ -162,6 +163,51 @@ export function Toast({ message, type = "info", onClose }) {
       onClick={onClose}
     >
       {message}
+    </div>
+  );
+}
+
+// ---------- Mode offline: hook status + banner ----------
+// Dipakai di GuruApp dan WaliKelasApp supaya semua menu tahu status
+// koneksi & jumlah data yang masih menunggu disinkronkan, dan otomatis
+// mencoba sinkron tiap ada sinyal / tiap 20 detik.
+export function useOfflineStatus(notify) {
+  const [pending, setPending] = useState(0);
+  const [offline, setOffline] = useState(typeof navigator !== "undefined" ? !navigator.onLine : false);
+
+  useEffect(() => {
+    const unsubQueue = subscribePending(setPending);
+    const onOnline = () => setOffline(false);
+    const onOffline = () => setOffline(true);
+    window.addEventListener("online", onOnline);
+    window.addEventListener("offline", onOffline);
+    const stopAutoSync = initAutoSync(notify);
+    return () => {
+      unsubQueue();
+      window.removeEventListener("online", onOnline);
+      window.removeEventListener("offline", onOffline);
+      stopAutoSync();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return { pending, offline, syncNow: () => syncNow(notify) };
+}
+
+export function OfflineBanner({ offline, pending, onSyncNow }) {
+  if (!offline && pending === 0) return null;
+  return (
+    <div
+      className="rounded-lg px-4 py-2.5 mb-5 text-sm font-semibold flex items-center justify-between gap-3 flex-wrap"
+      style={{ background: offline ? "#FFF1E4" : "#E8F6EE", color: offline ? "#8A4B00" : "#1D6B3D" }}
+    >
+      <span>
+        {offline ? "📴 Sedang offline." : "☁️ Terhubung."}
+        {pending > 0 && ` ${pending} data menunggu disinkronkan.`}
+      </span>
+      {pending > 0 && !offline && (
+        <button onClick={onSyncNow} className="text-xs font-bold underline">Sinkron sekarang</button>
+      )}
     </div>
   );
 }
