@@ -16,6 +16,9 @@ import {
   scoreLari60, scoreGantung, scoreSitup, scoreLoncat, scoreLariJauh,
   classifyTotal, totalToScale100, gantungLabel, lariJauhLabel, mmssToDetik, detikToMMSS,
 } from "./tkji.js";
+import {
+  beepVO2max, classifyVO2max, vo2ToScale100, customScore,
+} from "./otherTests.js";
 
 const NAV = [
   { key: "absensi", label: "Absensi", icon: CalendarCheck },
@@ -337,7 +340,34 @@ function PoinTab({ profile, classes, activeClassId, setActiveClassId, students, 
 
 // ================= NILAI PRAKTEK HARIAN =================
 // ================= TES KEBUGARAN (TKJI) =================
+// ================= TES KEBUGARAN — wrapper pemilih mode =================
 function TkjiTab({ profile, classes, activeClassId, setActiveClassId, students, notify }) {
+  const [mode, setMode] = useState("tkji"); // "tkji" | "beep" | "bebas"
+  const modes = [
+    { key: "tkji", label: "TKJI (Resmi)" },
+    { key: "beep", label: "Beep Test (MFT)" },
+    { key: "bebas", label: "Tes Bebas" },
+  ];
+  return (
+    <div>
+      <PageHeader eyebrow="Guru Mapel" title="Tes Kebugaran" right={<ClassPicker classes={classes} value={activeClassId} onChange={setActiveClassId} />} />
+      <div className="flex gap-2 mb-5 flex-wrap">
+        {modes.map((m) => (
+          <button key={m.key} onClick={() => setMode(m.key)}
+            className="text-xs font-bold px-3 py-1.5 rounded-full"
+            style={{ background: mode === m.key ? NAVY : "#EEF0F3", color: mode === m.key ? "#fff" : MUTED }}>
+            {m.label}
+          </button>
+        ))}
+      </div>
+      {mode === "tkji" && <TkjiMode profile={profile} classes={classes} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} notify={notify} />}
+      {mode === "beep" && <BeepTestMode profile={profile} classes={classes} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} notify={notify} />}
+      {mode === "bebas" && <TesBebasMode profile={profile} classes={classes} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} notify={notify} />}
+    </div>
+  );
+}
+
+function TkjiMode({ profile, classes, activeClassId, setActiveClassId, students, notify }) {
   const [studentId, setStudentId] = useState("");
   const [draftMap, setDraftMap] = useState({});
   const emptyForm = { lari60: "", gantung: "", situp: "", loncat: "", lariMenit: "", lariDetik: "" };
@@ -436,7 +466,6 @@ function TkjiTab({ profile, classes, activeClassId, setActiveClassId, students, 
 
   return (
     <div>
-      <PageHeader eyebrow="Guru Mapel" title="Tes Kebugaran (TKJI)" right={<ClassPicker classes={classes} value={activeClassId} onChange={setActiveClassId} />} />
       <div className="text-xs mb-4" style={{ color: MUTED }}>
         Norma TKJI usia 16-19 tahun. Isi angka mentah tiap item (boleh di hari berbeda-beda) — nilai & kategori
         dihitung otomatis. Kalau ke-5 item sudah lengkap, klik "Kirim ke Nilai Harian" untuk mengubahnya jadi satu
@@ -507,6 +536,224 @@ function TkjiTab({ profile, classes, activeClassId, setActiveClassId, students, 
                 {sending ? "Mengirim…" : "Kirim ke Nilai Harian"}
               </button>
             </div>
+          </Card>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ================= BEEP TEST (MFT) =================
+function BeepTestMode({ profile, students, notify }) {
+  const [studentId, setStudentId] = useState("");
+  const [level, setLevel] = useState("");
+  const [shuttle, setShuttle] = useState("");
+  const [age, setAge] = useState("");
+  const [sending, setSending] = useState(false);
+
+  useEffect(() => { setStudentId(students[0]?.id || ""); }, [students]);
+
+  const student = students.find((s) => s.id === studentId);
+  const gender = student?.gender || "L";
+  const vo2 = beepVO2max(level, shuttle, age);
+  const category = classifyVO2max(vo2, gender);
+
+  const send = async () => {
+    if (!studentId || vo2 == null) return;
+    setSending(true);
+    const note = `Beep Test/MFT: Level ${level} Shuttle ${shuttle}, usia ${age} th. Estimasi VO2max ${vo2} ml/kg/menit — Kategori: ${category}. (Estimasi rumus umum, bukan standar baku — mohon dicek ulang.)`;
+    const row = { id: genId(), student_id: studentId, guru_id: profile.id, subject: profile.subject, date: todayStr(), score: vo2ToScale100(vo2), note };
+    const { error, offline } = await offlineWrite("practice_scores", "insert", row);
+    setSending(false);
+    if (error) return notify("Gagal: " + error.message);
+    setLevel(""); setShuttle("");
+    notify(offline ? "Tersimpan offline, akan disinkron & masuk ke Nilai Harian otomatis." : `Hasil Beep Test (${category}) sudah masuk ke Nilai Harian.`);
+  };
+
+  return (
+    <div>
+      <div className="rounded-lg px-4 py-3 mb-4 text-xs" style={{ background: "#FFF4E5", color: "#8A5300" }}>
+        ⚠️ Estimasi VO2max di sini pakai rumus umum (Léger dkk.), <b>bukan</b> tabel standar baku resmi seperti
+        TKJI. Cocokkan dulu dengan pedoman sekolah/pengawas Anda sebelum dipakai untuk nilai rapor.
+      </div>
+      {students.length === 0 ? (
+        <Card><EmptyState icon={Users} text="Belum ada siswa di kelas ini." /></Card>
+      ) : (
+        <div className="flex flex-col md:flex-row gap-5">
+          <Card className="md:w-64 shrink-0" style={{ padding: 0 }}>
+            <div className="px-4 pt-4 pb-2 text-sm font-bold" style={{ color: INK }}>Daftar Siswa</div>
+            <div className="flex flex-col divide-y max-h-[70vh] overflow-y-auto" style={{ borderColor: "#EEF0F3" }}>
+              {students.map((s) => (
+                <button key={s.id} onClick={() => setStudentId(s.id)}
+                  className="w-full text-left px-4 py-2.5 text-sm">
+                  <span style={{ color: INK, fontWeight: studentId === s.id ? 700 : 500 }}>{s.name}</span>
+                </button>
+              ))}
+            </div>
+          </Card>
+          <Card className="flex-1">
+            <div className="text-sm font-bold mb-4" style={{ color: INK }}>{student?.name || "—"}</div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div>
+                <label className="text-xs font-semibold block mb-1" style={{ color: MUTED }}>Level Tercapai</label>
+                <input type="number" value={level} onChange={(e) => setLevel(e.target.value)} placeholder="mis. 7"
+                  className="text-sm px-3 py-2 rounded-lg w-full" style={{ background: BG, color: INK }} />
+              </div>
+              <div>
+                <label className="text-xs font-semibold block mb-1" style={{ color: MUTED }}>Shuttle ke-</label>
+                <input type="number" value={shuttle} onChange={(e) => setShuttle(e.target.value)} placeholder="mis. 4"
+                  className="text-sm px-3 py-2 rounded-lg w-full" style={{ background: BG, color: INK }} />
+              </div>
+              <div>
+                <label className="text-xs font-semibold block mb-1" style={{ color: MUTED }}>Usia (tahun)</label>
+                <input type="number" value={age} onChange={(e) => setAge(e.target.value)} placeholder="mis. 17"
+                  className="text-sm px-3 py-2 rounded-lg w-full" style={{ background: BG, color: INK }} />
+              </div>
+            </div>
+            <div className="mt-5 rounded-lg p-4 flex items-center justify-between gap-3 flex-wrap" style={{ background: vo2 != null ? "#E8F6EE" : BG }}>
+              <div>
+                {vo2 != null ? (
+                  <div className="text-sm font-bold" style={{ color: INK }}>Estimasi VO2max {vo2} ml/kg/menit — Kategori: {category}</div>
+                ) : (
+                  <div className="text-xs" style={{ color: MUTED }}>Isi Level dan Usia dulu.</div>
+                )}
+              </div>
+              <button onClick={send} disabled={vo2 == null || sending}
+                className="px-4 py-2 rounded-lg text-sm font-semibold text-white shrink-0"
+                style={{ background: NAVY, opacity: (vo2 == null || sending) ? 0.5 : 1 }}>
+                {sending ? "Mengirim…" : "Kirim ke Nilai Harian"}
+              </button>
+            </div>
+          </Card>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ================= TES BEBAS =================
+function TesBebasMode({ profile, students, notify }) {
+  const [presets, setPresets] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("r3edu_tes_bebas_presets") || "[]"); } catch { return []; }
+  });
+  const [testName, setTestName] = useState("");
+  const [unit, setUnit] = useState("");
+  const [worst, setWorst] = useState("");
+  const [best, setBest] = useState("");
+  const [studentId, setStudentId] = useState("");
+  const [raw, setRaw] = useState("");
+  const [manualScore, setManualScore] = useState("");
+  const [sending, setSending] = useState(false);
+
+  useEffect(() => { setStudentId(students[0]?.id || ""); }, [students]);
+
+  const student = students.find((s) => s.id === studentId);
+  const autoScore = customScore(raw, worst, best);
+  const finalScore = manualScore !== "" ? Number(manualScore) : autoScore;
+
+  const savePreset = () => {
+    if (!testName.trim()) return;
+    const next = [{ name: testName.trim(), unit: unit.trim(), worst, best }, ...presets.filter((p) => p.name !== testName.trim())].slice(0, 10);
+    setPresets(next);
+    try { localStorage.setItem("r3edu_tes_bebas_presets", JSON.stringify(next)); } catch { /* abaikan */ }
+  };
+
+  const loadPreset = (p) => {
+    setTestName(p.name); setUnit(p.unit); setWorst(p.worst); setBest(p.best);
+  };
+
+  const send = async () => {
+    if (!studentId || !testName.trim() || finalScore == null) return;
+    setSending(true);
+    savePreset();
+    const note = `Tes Bebas — ${testName.trim()}: ${raw}${unit ? " " + unit : ""}${manualScore !== "" ? " (nilai diisi manual)" : ` (nilai 0 = ${worst}, nilai 100 = ${best})`}.`;
+    const row = { id: genId(), student_id: studentId, guru_id: profile.id, subject: profile.subject, date: todayStr(), score: Math.max(0, Math.min(100, finalScore)), note };
+    const { error, offline } = await offlineWrite("practice_scores", "insert", row);
+    setSending(false);
+    if (error) return notify("Gagal: " + error.message);
+    setRaw(""); setManualScore("");
+    notify(offline ? "Tersimpan offline, akan disinkron & masuk ke Nilai Harian otomatis." : "Hasil tes sudah masuk ke Nilai Harian.");
+  };
+
+  return (
+    <div>
+      <Card className="mb-5">
+        <div className="text-sm font-bold mb-3" style={{ color: INK }}>1. Atur Tes</div>
+        {presets.length > 0 && (
+          <div className="flex gap-2 flex-wrap mb-3">
+            {presets.map((p) => (
+              <button key={p.name} onClick={() => loadPreset(p)}
+                className="text-xs font-semibold px-3 py-1 rounded-full" style={{ background: "#EEF0F3", color: INK }}>
+                {p.name}
+              </button>
+            ))}
+          </div>
+        )}
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+          <div className="sm:col-span-2">
+            <label className="text-xs font-semibold block mb-1" style={{ color: MUTED }}>Nama Tes</label>
+            <input value={testName} onChange={(e) => setTestName(e.target.value)} placeholder="mis. Wall Sit"
+              className="text-sm px-3 py-2 rounded-lg w-full" style={{ background: BG, color: INK }} />
+          </div>
+          <div>
+            <label className="text-xs font-semibold block mb-1" style={{ color: MUTED }}>Satuan</label>
+            <input value={unit} onChange={(e) => setUnit(e.target.value)} placeholder="mis. detik"
+              className="text-sm px-3 py-2 rounded-lg w-full" style={{ background: BG, color: INK }} />
+          </div>
+          <div />
+          <div>
+            <label className="text-xs font-semibold block mb-1" style={{ color: MUTED }}>Nilai 0 di angka</label>
+            <input type="number" value={worst} onChange={(e) => setWorst(e.target.value)} placeholder="mis. 10"
+              className="text-sm px-3 py-2 rounded-lg w-full" style={{ background: BG, color: INK }} />
+          </div>
+          <div>
+            <label className="text-xs font-semibold block mb-1" style={{ color: MUTED }}>Nilai 100 di angka</label>
+            <input type="number" value={best} onChange={(e) => setBest(e.target.value)} placeholder="mis. 90"
+              className="text-sm px-3 py-2 rounded-lg w-full" style={{ background: BG, color: INK }} />
+          </div>
+        </div>
+        <div className="text-xs mt-2" style={{ color: MUTED }}>
+          Tidak wajib diisi kalau mau isi nilai manual saja. Arah (makin besar/makin kecil makin baik) otomatis
+          mengikuti mana yang lebih besar di antara "Nilai 0" dan "Nilai 100".
+        </div>
+      </Card>
+
+      {students.length === 0 ? (
+        <Card><EmptyState icon={Users} text="Belum ada siswa di kelas ini." /></Card>
+      ) : (
+        <div className="flex flex-col md:flex-row gap-5">
+          <Card className="md:w-64 shrink-0" style={{ padding: 0 }}>
+            <div className="px-4 pt-4 pb-2 text-sm font-bold" style={{ color: INK }}>Daftar Siswa</div>
+            <div className="flex flex-col divide-y max-h-[70vh] overflow-y-auto" style={{ borderColor: "#EEF0F3" }}>
+              {students.map((s) => (
+                <button key={s.id} onClick={() => setStudentId(s.id)} className="w-full text-left px-4 py-2.5 text-sm">
+                  <span style={{ color: INK, fontWeight: studentId === s.id ? 700 : 500 }}>{s.name}</span>
+                </button>
+              ))}
+            </div>
+          </Card>
+          <Card className="flex-1">
+            <div className="text-sm font-bold mb-4" style={{ color: INK }}>2. Isi Hasil — {student?.name || "—"}</div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="text-xs font-semibold block mb-1" style={{ color: MUTED }}>Hasil Mentah {unit && `(${unit})`}</label>
+                <input type="number" value={raw} onChange={(e) => setRaw(e.target.value)} placeholder="mis. 45"
+                  className="text-sm px-3 py-2 rounded-lg w-full" style={{ background: BG, color: INK }} />
+              </div>
+              <div>
+                <label className="text-xs font-semibold block mb-1" style={{ color: MUTED }}>
+                  Nilai (0-100) {autoScore != null && manualScore === "" && "— otomatis"}
+                </label>
+                <input type="number" value={manualScore !== "" ? manualScore : (autoScore ?? "")} onChange={(e) => setManualScore(e.target.value)}
+                  placeholder="Bisa diubah manual"
+                  className="text-sm px-3 py-2 rounded-lg w-full" style={{ background: BG, color: INK }} />
+              </div>
+            </div>
+            <button onClick={send} disabled={!testName.trim() || finalScore == null || sending}
+              className="mt-4 px-4 py-2 rounded-lg text-sm font-semibold text-white"
+              style={{ background: NAVY, opacity: (!testName.trim() || finalScore == null || sending) ? 0.5 : 1 }}>
+              {sending ? "Mengirim…" : "Kirim ke Nilai Harian"}
+            </button>
           </Card>
         </div>
       )}
