@@ -17,7 +17,7 @@ import {
   classifyTotal, totalToScale100, gantungLabel, lariJauhLabel, mmssToDetik, detikToMMSS,
 } from "./tkji.js";
 import {
-  beepVO2max, classifyVO2max, vo2ToScale100, customScore,
+  beepVO2max, classifyVO2max, customScore,
 } from "./otherTests.js";
 
 const NAV = [
@@ -550,19 +550,28 @@ function BeepTestMode({ profile, students, notify }) {
   const [shuttle, setShuttle] = useState("");
   const [age, setAge] = useState("");
   const [sending, setSending] = useState(false);
+  const [worst, setWorst] = useState(() => {
+    try { return localStorage.getItem("r3edu_beep_worst") || "20"; } catch { return "20"; }
+  });
+  const [best, setBest] = useState(() => {
+    try { return localStorage.getItem("r3edu_beep_best") || "65"; } catch { return "65"; }
+  });
 
   useEffect(() => { setStudentId(students[0]?.id || ""); }, [students]);
+  useEffect(() => { try { localStorage.setItem("r3edu_beep_worst", worst); } catch { /* abaikan */ } }, [worst]);
+  useEffect(() => { try { localStorage.setItem("r3edu_beep_best", best); } catch { /* abaikan */ } }, [best]);
 
   const student = students.find((s) => s.id === studentId);
   const gender = student?.gender || "L";
   const vo2 = beepVO2max(level, shuttle, age);
   const category = classifyVO2max(vo2, gender);
+  const scaledScore = vo2 != null ? customScore(vo2, worst, best) : null;
 
   const send = async () => {
-    if (!studentId || vo2 == null) return;
+    if (!studentId || vo2 == null || scaledScore == null) return;
     setSending(true);
-    const note = `Beep Test/MFT: Level ${level} Shuttle ${shuttle}, usia ${age} th. Estimasi VO2max ${vo2} ml/kg/menit — Kategori: ${category}. (Estimasi rumus umum, bukan standar baku — mohon dicek ulang.)`;
-    const row = { id: genId(), student_id: studentId, guru_id: profile.id, subject: profile.subject, date: todayStr(), score: vo2ToScale100(vo2), note };
+    const note = `Beep Test/MFT: Level ${level} Shuttle ${shuttle}, usia ${age} th. Estimasi VO2max ${vo2} ml/kg/menit — Kategori: ${category}. Skala nilai: VO2max ${worst}=0, ${best}=100. (Estimasi rumus umum, bukan standar baku — mohon dicek ulang.)`;
+    const row = { id: genId(), student_id: studentId, guru_id: profile.id, subject: profile.subject, date: todayStr(), score: scaledScore, note };
     const { error, offline } = await offlineWrite("practice_scores", "insert", row);
     setSending(false);
     if (error) return notify("Gagal: " + error.message);
@@ -576,6 +585,24 @@ function BeepTestMode({ profile, students, notify }) {
         ⚠️ Estimasi VO2max di sini pakai rumus umum (Léger dkk.), <b>bukan</b> tabel standar baku resmi seperti
         TKJI. Cocokkan dulu dengan pedoman sekolah/pengawas Anda sebelum dipakai untuk nilai rapor.
       </div>
+      <Card className="mb-5">
+        <div className="text-sm font-bold mb-3" style={{ color: INK }}>Atur Skala Nilai</div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label className="text-xs font-semibold block mb-1" style={{ color: MUTED }}>VO2max untuk Nilai 0</label>
+            <input type="number" value={worst} onChange={(e) => setWorst(e.target.value)}
+              className="text-sm px-3 py-2 rounded-lg w-full" style={{ background: BG, color: INK }} />
+          </div>
+          <div>
+            <label className="text-xs font-semibold block mb-1" style={{ color: MUTED }}>VO2max untuk Nilai 100</label>
+            <input type="number" value={best} onChange={(e) => setBest(e.target.value)}
+              className="text-sm px-3 py-2 rounded-lg w-full" style={{ background: BG, color: INK }} />
+          </div>
+        </div>
+        <div className="text-xs mt-2" style={{ color: MUTED }}>
+          Angka ini diingat otomatis untuk pemakaian berikutnya. Boleh dibedakan per kelas/gender kalau perlu, tinggal diubah sebelum isi hasil.
+        </div>
+      </Card>
       {students.length === 0 ? (
         <Card><EmptyState icon={Users} text="Belum ada siswa di kelas ini." /></Card>
       ) : (
@@ -613,14 +640,16 @@ function BeepTestMode({ profile, students, notify }) {
             <div className="mt-5 rounded-lg p-4 flex items-center justify-between gap-3 flex-wrap" style={{ background: vo2 != null ? "#E8F6EE" : BG }}>
               <div>
                 {vo2 != null ? (
-                  <div className="text-sm font-bold" style={{ color: INK }}>Estimasi VO2max {vo2} ml/kg/menit — Kategori: {category}</div>
+                  <div className="text-sm font-bold" style={{ color: INK }}>
+                    Estimasi VO2max {vo2} ml/kg/menit — Kategori: {category} — Nilai: {scaledScore ?? "—"}
+                  </div>
                 ) : (
                   <div className="text-xs" style={{ color: MUTED }}>Isi Level dan Usia dulu.</div>
                 )}
               </div>
-              <button onClick={send} disabled={vo2 == null || sending}
+              <button onClick={send} disabled={vo2 == null || scaledScore == null || sending}
                 className="px-4 py-2 rounded-lg text-sm font-semibold text-white shrink-0"
-                style={{ background: NAVY, opacity: (vo2 == null || sending) ? 0.5 : 1 }}>
+                style={{ background: NAVY, opacity: (vo2 == null || scaledScore == null || sending) ? 0.5 : 1 }}>
                 {sending ? "Mengirim…" : "Kirim ke Nilai Harian"}
               </button>
             </div>
