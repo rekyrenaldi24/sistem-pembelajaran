@@ -61,6 +61,11 @@ export default function WaliKelasApp({ profile, onLogout, onSwitchRole }) {
   };
 
   const activeClass = classes.find((c) => c.id === activeClassId);
+  // Wali kelas cuma boleh LIHAT & KELOLA kelas miliknya sendiri, plus kelas lama
+  // yang belum ada pemiliknya (owner_id kosong) — supaya tombol klaim masih bisa
+  // dipakai. Kelas milik wali kelas LAIN tidak ditampilkan di sini (biar tidak
+  // membingungkan), walaupun secara data memang sudah diblokir oleh RLS.
+  const myClasses = classes.filter((c) => c.owner_id === profile.id || !c.owner_id);
 
   return (
     <div className="min-h-screen w-full flex flex-col md:flex-row" style={{ background: BG, fontFamily: "Arial, sans-serif" }}>
@@ -114,12 +119,12 @@ export default function WaliKelasApp({ profile, onLogout, onSwitchRole }) {
             <button onClick={claimClass} className="font-bold underline">Jadikan saya wali kelas ini</button>
           </div>
         )}
-        {tab === "absensi" && <AbsensiTab profile={profile} classes={classes} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} notify={notify} activeClass={activeClass} />}
-        {tab === "absen_mapel" && <AbsenMapelTab profile={profile} classes={classes} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} notify={notify} />}
-        {tab === "catatan" && <CatatanTab profile={profile} classes={classes} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} notify={notify} />}
-        {tab === "biodata" && <BiodataTab profile={profile} classes={classes} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} notify={notify} />}
-        {tab === "tabungan" && <TabunganTab profile={profile} classes={classes} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} notify={notify} activeClass={activeClass} />}
-        {tab === "siswa" && <SiswaTab profile={profile} classes={classes} setClasses={setClasses} reloadClasses={loadClasses} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} setStudents={setStudents} notify={notify} />}
+        {tab === "absensi" && <AbsensiTab profile={profile} classes={myClasses} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} notify={notify} activeClass={activeClass} />}
+        {tab === "absen_mapel" && <AbsenMapelTab profile={profile} classes={myClasses} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} notify={notify} />}
+        {tab === "catatan" && <CatatanTab profile={profile} classes={myClasses} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} notify={notify} />}
+        {tab === "biodata" && <BiodataTab profile={profile} classes={myClasses} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} notify={notify} />}
+        {tab === "tabungan" && <TabunganTab profile={profile} classes={myClasses} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} notify={notify} activeClass={activeClass} />}
+        {tab === "siswa" && <SiswaTab profile={profile} classes={myClasses} setClasses={setClasses} reloadClasses={loadClasses} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} setStudents={setStudents} notify={notify} />}
         {tab === "riwayat" && <AuditLogTab profile={profile} />}
       </main>
       <Toast message={toast} onClose={() => setToast("")} />
