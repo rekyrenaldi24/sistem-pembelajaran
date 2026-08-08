@@ -27,7 +27,7 @@ const NAV = [
   { key: "kebugaran", label: "Tes Kebugaran", icon: Activity },
   { key: "ujian", label: "Ujian Akhir", icon: FileSpreadsheet },
   { key: "akhir", label: "Nilai Akhir", icon: LayoutDashboard },
-  { key: "siswa", label: "Kelas & Siswa", icon: Users },
+  { key: "siswa", label: "Pilih Kelas", icon: Users },
   { key: "riwayat", label: "Riwayat Aktivitas", icon: History },
 ];
 
@@ -110,7 +110,7 @@ export default function GuruApp({ profile, onLogout, onSwitchRole }) {
         {tab === "kebugaran" && <TkjiTab profile={profile} classes={classes} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} notify={notify} />}
         {tab === "ujian" && <UjianTab profile={profile} classes={classes} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} notify={notify} />}
         {tab === "akhir" && <NilaiAkhirTab profile={profile} classes={classes} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} activeClass={activeClass} notify={notify} />}
-        {tab === "siswa" && <SiswaTab profile={profile} classes={classes} setClasses={setClasses} reloadClasses={loadClasses} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} setStudents={setStudents} notify={notify} />}
+        {tab === "siswa" && <SiswaTab profile={profile} classes={classes} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} notify={notify} />}
         {tab === "riwayat" && <AuditLogTab profile={profile} />}
       </main>
       <Toast message={toast} onClose={() => setToast("")} />
@@ -205,7 +205,7 @@ function AbsensiTab({ profile, classes, activeClassId, setActiveClassId, student
             </div>
           ))}
         </div>
-        {students.length === 0 ? <EmptyState icon={Users} text="Belum ada siswa di kelas ini. Tambahkan lewat tab Kelas & Siswa." /> : (
+        {students.length === 0 ? <EmptyState icon={Users} text="Belum ada siswa di kelas ini. Hubungi wali kelasnya untuk mengisi data siswa." /> : (
           <div className="flex flex-col divide-y" style={{ borderColor: "#EEF0F3" }}>
             {students.map((s, i) => (
               <div key={s.id} className="flex items-center justify-between py-2.5 gap-3 flex-wrap">
@@ -1215,160 +1215,66 @@ function NilaiAkhirTab({ profile, classes, activeClassId, setActiveClassId, stud
 }
 
 // ================= KELAS & SISWA =================
-function SiswaTab({ profile, classes, setClasses, reloadClasses, activeClassId, setActiveClassId, students, setStudents, notify }) {
-  const [newClass, setNewClass] = useState("");
-  const [name, setName] = useState("");
-  const [gender, setGender] = useState("L");
-  const [editingClassId, setEditingClassId] = useState(null);
-  const [editingClassName, setEditingClassName] = useState("");
+function SiswaTab({ profile, classes, activeClassId, setActiveClassId, students, notify }) {
+  const [jurusanList, setJurusanList] = useState([]);
 
-  const addClass = async () => {
-    const c = newClass.trim();
-    if (!c) return;
-    const row = { id: genId(), name: c, owner_id: profile.id };
-    const { error, offline } = await offlineWrite("classes", "insert", row);
-    if (error) return notify("Gagal: " + error.message);
-    setClasses((prev) => [...prev, row].sort((a, b) => a.name.localeCompare(b.name)));
-    if (!activeClassId) setActiveClassId(row.id);
-    setNewClass("");
-    notify(offline ? "Kelas tersimpan offline, akan disinkron otomatis." : "Kelas ditambahkan.");
-  };
+  useEffect(() => {
+    supabase.from("jurusan").select("id, name").order("name").then(({ data }) => setJurusanList(data || []));
+  }, []);
 
-  const startEditClass = (c) => { setEditingClassId(c.id); setEditingClassName(c.name); };
-  const saveEditClass = async () => {
-    const nm = editingClassName.trim();
-    if (!nm) return;
-    const { error, offline } = await offlineWrite("classes", "update", { name: nm }, { match: { id: editingClassId } });
-    if (error) return notify("Gagal: " + error.message);
-    setClasses((prev) => prev.map((c) => c.id === editingClassId ? { ...c, name: nm } : c));
-    setEditingClassId(null);
-    notify(offline ? "Tersimpan offline, akan disinkron otomatis." : "Nama kelas diperbarui.");
-  };
-  const deleteClass = async (c) => {
-    if (!confirm(`Hapus kelas "${c.name}"? Semua data siswa, absensi, dan nilai di kelas ini akan ikut terhapus permanen.`)) return;
-    const { error, offline } = await offlineWrite("classes", "delete", null, { match: { id: c.id } });
-    if (error) return notify("Gagal: " + error.message);
-    setClasses((prev) => prev.filter((x) => x.id !== c.id));
-    notify(offline ? "Tersimpan offline, akan disinkron otomatis." : "Kelas dihapus.");
-  };
-
-  const addStudent = async () => {
-    if (!name.trim() || !activeClassId) return;
-    const row = { id: genId(), name: name.trim(), class_id: activeClassId, gender };
-    const { error, offline } = await offlineWrite("students", "insert", row);
-    if (error) return notify("Gagal: " + error.message);
-    setStudents((prev) => [...prev, row]);
-    setName("");
-    if (offline) notify("Siswa tersimpan offline, akan disinkron otomatis.");
-  };
-  const removeStudent = async (id) => {
-    setStudents((prev) => prev.filter((s) => s.id !== id));
-    await offlineWrite("students", "delete", null, { match: { id } });
-  };
-  const toggleGender = async (s) => {
-    const next = s.gender === "L" ? "P" : "L";
-    setStudents((prev) => prev.map((x) => x.id === s.id ? { ...x, gender: next } : x));
-    const { error } = await offlineWrite("students", "update", { gender: next }, { match: { id: s.id } });
-    if (error) notify("Gagal: " + error.message);
-  };
-
-  const [importing, setImporting] = useState(false);
-  const fileInputRef = React.useRef(null);
-  const handleImportFile = async (e) => {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file || !activeClassId) return;
-    setImporting(true);
-    try {
-      const rows = await parseStudentsExcel(file);
-      if (rows.length === 0) { notify("Tidak ada data siswa yang terbaca di file itu."); setImporting(false); return; }
-      const toInsert = rows.map((r) => ({ id: genId(), name: r.name, gender: r.gender, class_id: activeClassId }));
-      const { error, offline } = await offlineWrite("students", "insert", toInsert);
-      if (error) { notify("Gagal impor: " + error.message); setImporting(false); return; }
-      setStudents((prev) => [...prev, ...toInsert]);
-      const missingGender = rows.filter((r) => !r.gender).length;
-      notify(`${toInsert.length} siswa ${offline ? "tersimpan offline (akan disinkron otomatis)" : "berhasil diimpor"}.` + (missingGender ? ` (${missingGender} tanpa jenis kelamin, isi manual)` : ""));
-    } catch (err) {
-      notify("Gagal membaca file: " + err.message);
-    }
-    setImporting(false);
-  };
+  const jurusanName = (id) => jurusanList.find((j) => j.id === id)?.name;
+  const grouped = useMemo(() => {
+    const map = {};
+    classes.forEach((c) => {
+      const key = jurusanName(c.jurusan_id) || "Belum ada jurusan";
+      if (!map[key]) map[key] = [];
+      map[key].push(c);
+    });
+    return Object.entries(map).sort(([a], [b]) => a.localeCompare(b));
+  }, [classes, jurusanList]);
 
   return (
     <div>
-      <PageHeader eyebrow="Data Anda Sendiri" title="Kelas & Siswa" />
+      <PageHeader eyebrow="Kelas se-Sekolah" title="Pilih Kelas" />
       <Card className="mb-5">
-        <div className="text-sm font-bold mb-3" style={{ color: INK }}>Kelas</div>
-        <div className="flex flex-col divide-y mb-4" style={{ borderColor: "#EEF0F3" }}>
-          {classes.length === 0 && <div className="text-xs py-2" style={{ color: MUTED }}>Belum ada kelas.</div>}
-          {classes.map((c) => (
-            <div key={c.id} className="flex items-center justify-between py-2.5 gap-2">
-              {editingClassId === c.id ? (
-                <>
-                  <input value={editingClassName} onChange={(e) => setEditingClassName(e.target.value)}
-                    className="text-sm px-2.5 py-1.5 rounded-md flex-1" style={{ background: BG, color: INK }}
-                    onKeyDown={(e) => e.key === "Enter" && saveEditClass()} autoFocus />
-                  <button onClick={saveEditClass} className="w-8 h-8 rounded-md flex items-center justify-center" style={{ background: "#EAF7EF" }}>✓</button>
-                  <button onClick={() => setEditingClassId(null)} className="w-8 h-8 rounded-md flex items-center justify-center" style={{ background: BG }}>✕</button>
-                </>
-              ) : (
-                <>
-                  <span className="text-sm font-medium" style={{ color: INK }}>{c.name}</span>
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    <button onClick={() => startEditClass(c)} className="w-8 h-8 rounded-md flex items-center justify-center" style={{ background: BG }}><Pencil size={13} color={MUTED} /></button>
-                    <button onClick={() => deleteClass(c)} className="w-8 h-8 rounded-md flex items-center justify-center" style={{ background: "#FBEAEC" }}><Trash2 size={13} color={RED} /></button>
-                  </div>
-                </>
-              )}
+        <div className="text-sm font-bold mb-1" style={{ color: INK }}>Semua Kelas</div>
+        <div className="text-xs mb-3" style={{ color: MUTED }}>
+          Daftar ini diisi oleh masing-masing wali kelas. Kalau kelas yang Anda cari belum muncul, minta wali kelasnya membuat kelas itu dulu.
+        </div>
+        {classes.length === 0 && <div className="text-xs py-2" style={{ color: MUTED }}>Belum ada kelas yang dibuat wali kelas.</div>}
+        <div className="flex flex-col gap-4">
+          {grouped.map(([jname, list]) => (
+            <div key={jname}>
+              <div className="text-xs font-bold uppercase tracking-wide mb-1.5" style={{ color: ORANGE }}>{jname}</div>
+              <div className="flex flex-col divide-y" style={{ borderColor: "#EEF0F3" }}>
+                {list.map((c) => (
+                  <button key={c.id} onClick={() => setActiveClassId(c.id)}
+                    className="flex items-center justify-between py-2.5 text-left"
+                    style={{ color: c.id === activeClassId ? ORANGE : INK }}>
+                    <span className="text-sm font-medium">{c.name}</span>
+                    {c.id === activeClassId && <span className="text-xs font-bold">Dipilih ✓</span>}
+                  </button>
+                ))}
+              </div>
             </div>
           ))}
-        </div>
-        <div className="flex gap-2">
-          <input value={newClass} onChange={(e) => setNewClass(e.target.value)} placeholder="Nama kelas, mis. 8C" className="text-sm px-3 py-2 rounded-lg flex-1 max-w-xs" style={{ background: BG, color: INK }} onKeyDown={(e) => e.key === "Enter" && addClass()} />
-          <button onClick={addClass} className="px-3.5 py-2 rounded-lg text-sm font-semibold text-white flex items-center gap-1.5" style={{ background: NAVY }}><Plus size={14} /> Tambah</button>
         </div>
       </Card>
       <Card>
         <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-          <div className="text-sm font-bold" style={{ color: INK }}>Siswa</div>
-          <ClassPicker classes={classes} value={activeClassId} onChange={setActiveClassId} />
-        </div>
-        <div className="flex flex-wrap gap-2 mb-4 pb-4" style={{ borderBottom: "1px solid #EEF0F3" }}>
-          <button onClick={downloadStudentTemplate} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold" style={{ background: BG, color: INK }}>
-            <FileDown size={14} /> Unduh Template Excel
-          </button>
-          <button onClick={() => fileInputRef.current?.click()} disabled={!activeClassId || importing}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold text-white" style={{ background: ORANGE, opacity: (!activeClassId || importing) ? 0.6 : 1 }}>
-            <Upload size={14} /> {importing ? "Mengimpor…" : "Upload Excel Siswa"}
-          </button>
-          <input ref={fileInputRef} type="file" accept=".xlsx,.xls" onChange={handleImportFile} className="hidden" />
-          <span className="text-xs self-center" style={{ color: MUTED }}>Isi kolom Nama & Jenis Kelamin (L/P) di template, lalu upload lagi ke sini.</span>
-        </div>
-        <div className="flex gap-2 mb-4 flex-wrap">
-          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nama siswa baru" className="text-sm px-3 py-2 rounded-lg flex-1 min-w-[160px]" style={{ background: BG, color: INK }} onKeyDown={(e) => e.key === "Enter" && addStudent()} />
-          <div className="flex rounded-lg overflow-hidden" style={{ border: "1px solid #E7E9EE" }}>
-            {["L", "P"].map((g) => (
-              <button key={g} type="button" onClick={() => setGender(g)}
-                className="px-3 py-2 text-xs font-bold" style={{ background: gender === g ? ORANGE : "white", color: gender === g ? "white" : MUTED }}>
-                {g}
-              </button>
-            ))}
-          </div>
-          <button onClick={addStudent} className="px-3.5 py-2 rounded-lg text-sm font-semibold text-white flex items-center gap-1.5" style={{ background: ORANGE }}><Plus size={14} /> Tambah</button>
+          <div className="text-sm font-bold" style={{ color: INK }}>Siswa {classes.find((c) => c.id === activeClassId)?.name ? `— Kelas ${classes.find((c) => c.id === activeClassId).name}` : ""}</div>
         </div>
         {students.length === 0 ? <EmptyState icon={Users} text="Belum ada siswa di kelas ini." /> : (
           <div className="flex flex-col divide-y" style={{ borderColor: "#EEF0F3" }}>
-            {students.map((s) => (
+            {students.map((s, i) => (
               <div key={s.id} className="flex items-center justify-between py-2.5">
-                <span className="text-sm" style={{ color: INK }}>{s.name}</span>
-                <div className="flex items-center gap-2">
-                  <button onClick={() => toggleGender(s)} className="text-xs font-bold px-2 py-1 rounded-md"
-                    style={{ background: s.gender === "P" ? "#FBEAF2" : "#EAF1FB", color: s.gender === "P" ? "#C23B78" : "#2B5FB8" }}
-                    title="Klik untuk ubah">
-                    {s.gender || "?"}
-                  </button>
-                  <button onClick={() => removeStudent(s.id)} className="w-8 h-8 rounded-md flex items-center justify-center" style={{ background: "#FBEAEC" }}><Trash2 size={13} color={RED} /></button>
-                </div>
+                <span className="text-sm" style={{ color: INK }}>
+                  <span style={{ color: MUTED, fontWeight: 600 }}>{i + 1}.</span> {s.name}
+                </span>
+                <span className="text-xs font-bold px-2 py-1 rounded-md"
+                  style={{ background: s.gender === "P" ? "#FBEAF2" : "#EAF1FB", color: s.gender === "P" ? "#C23B78" : "#2B5FB8" }}>
+                  {s.gender || "?"}
+                </span>
               </div>
             ))}
           </div>
