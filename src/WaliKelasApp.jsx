@@ -7,12 +7,13 @@ import {
 } from "./shared.jsx";
 import { offlineWrite, genId } from "./offlineSync.js";
 import {
-  CalendarCheck, StickyNote, PiggyBank, Users, LogOut, Plus, Trash2, Download, Wallet, Pencil, Repeat, FileDown, Upload, History, ClipboardList, Save, Lock,
+  CalendarCheck, StickyNote, PiggyBank, Users, LogOut, Plus, Trash2, Download, Wallet, Pencil, Repeat, FileDown, Upload, History, ClipboardList, Save, Lock, BookOpen,
 } from "lucide-react";
 import AuditLogTab from "./AuditLog.jsx";
 
 const NAV = [
   { key: "absensi", label: "Absensi Kelas", icon: CalendarCheck },
+  { key: "absen_mapel", label: "Absen per Mapel", icon: BookOpen },
   { key: "catatan", label: "Catatan", icon: StickyNote },
   { key: "biodata", label: "Biodata Siswa", icon: ClipboardList },
   { key: "tabungan", label: "Tabungan", icon: PiggyBank },
@@ -53,9 +54,9 @@ export default function WaliKelasApp({ profile, onLogout, onSwitchRole }) {
 
   const claimClass = async () => {
     if (!activeClassId) return;
-    const { error, offline: isOff } = await offlineWrite("classes", "update", { wali_kelas_id: profile.id }, { match: { id: activeClassId } });
+    const { error, offline: isOff } = await offlineWrite("classes", "update", { wali_kelas_id: profile.id, owner_id: profile.id }, { match: { id: activeClassId } });
     if (error) return notify("Gagal: " + error.message);
-    setClasses((prev) => prev.map((c) => c.id === activeClassId ? { ...c, wali_kelas_id: profile.id } : c));
+    setClasses((prev) => prev.map((c) => c.id === activeClassId ? { ...c, wali_kelas_id: profile.id, owner_id: profile.id } : c));
     notify(isOff ? "Tersimpan offline, akan disinkron otomatis." : "Kelas ini sekarang di bawah perwalian Anda.");
   };
 
@@ -114,6 +115,7 @@ export default function WaliKelasApp({ profile, onLogout, onSwitchRole }) {
           </div>
         )}
         {tab === "absensi" && <AbsensiTab profile={profile} classes={classes} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} notify={notify} activeClass={activeClass} />}
+        {tab === "absen_mapel" && <AbsenMapelTab profile={profile} classes={classes} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} notify={notify} />}
         {tab === "catatan" && <CatatanTab profile={profile} classes={classes} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} notify={notify} />}
         {tab === "biodata" && <BiodataTab profile={profile} classes={classes} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} notify={notify} />}
         {tab === "tabungan" && <TabunganTab profile={profile} classes={classes} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} notify={notify} activeClass={activeClass} />}
@@ -920,23 +922,99 @@ function TabunganTab({ profile, classes, activeClassId, setActiveClassId, studen
 }
 
 // ================= KELAS & SISWA =================
+// ================= ABSEN PER MATA PELAJARAN (read-only, diisi Guru Mapel) =================
+function AbsenMapelTab({ profile, classes, activeClassId, setActiveClassId, students, notify }) {
+  const [date, setDate] = useState(todayStr());
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!activeClassId || students.length === 0) { setRows([]); return; }
+    setLoading(true);
+    supabase.from("attendance").select("student_id,subject,status")
+      .eq("date", date)
+      .in("student_id", students.map((s) => s.id))
+      .then(({ data }) => { setRows(data || []); setLoading(false); });
+  }, [activeClassId, date, students]);
+
+  const subjects = useMemo(() => {
+    const set = new Set(rows.map((r) => r.subject));
+    return Array.from(set).sort();
+  }, [rows]);
+
+  const statusFor = (subject, studentId) => rows.find((r) => r.subject === subject && r.student_id === studentId)?.status;
+
+  return (
+    <div>
+      <PageHeader eyebrow="Read-only · diisi Guru Mapel" title="Absen per Mata Pelajaran" right={<ClassPicker classes={classes} value={activeClassId} onChange={setActiveClassId} />} />
+      <Card>
+        <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="text-sm px-3 py-2 rounded-lg font-semibold" style={{ background: BG, color: INK }} />
+          <span className="text-xs" style={{ color: MUTED }}>Data ini diisi oleh guru mapel masing-masing, tidak bisa diubah di sini.</span>
+        </div>
+        {loading ? (
+          <div className="text-xs py-4" style={{ color: MUTED }}>Memuat…</div>
+        ) : subjects.length === 0 ? (
+          <EmptyState icon={CalendarCheck} text="Belum ada guru mapel yang mengisi absensi untuk kelas ini di tanggal tersebut." />
+        ) : (
+          <div className="flex flex-col gap-5">
+            {subjects.map((subj) => (
+              <div key={subj}>
+                <div className="text-xs font-bold uppercase tracking-wide mb-1.5" style={{ color: ORANGE }}>{subj}</div>
+                <div className="flex flex-col divide-y" style={{ borderColor: "#EEF0F3" }}>
+                  {students.map((s) => {
+                    const st = statusFor(subj, s.id);
+                    const meta = ATT_STATUSES.find((x) => x.key === st);
+                    return (
+                      <div key={s.id} className="flex items-center justify-between py-2">
+                        <span className="text-sm" style={{ color: INK }}>{s.name}</span>
+                        {st ? (
+                          <span className="text-xs font-bold px-2 py-1 rounded-md" style={{ background: (meta?.color || MUTED) + "1A", color: meta?.color || MUTED }}>{st}</span>
+                        ) : <span className="text-xs" style={{ color: MUTED }}>—</span>}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+// ================= KELAS & SISWA =================
 function SiswaTab({ profile, classes, setClasses, reloadClasses, activeClassId, setActiveClassId, students, setStudents, notify }) {
   const [newClass, setNewClass] = useState("");
+  const [newClassJurusan, setNewClassJurusan] = useState("");
   const [name, setName] = useState("");
   const [gender, setGender] = useState("L");
   const [editingClassId, setEditingClassId] = useState(null);
   const [editingClassName, setEditingClassName] = useState("");
+  const [jurusanList, setJurusanList] = useState([]);
+
+  useEffect(() => {
+    supabase.from("jurusan").select("id, name").order("name").then(({ data }) => setJurusanList(data || []));
+  }, []);
 
   const addClass = async () => {
     const c = newClass.trim();
     if (!c) return;
-    const row = { id: genId(), name: c, owner_id: profile.id };
+    if (!newClassJurusan) { notify("Pilih jurusan untuk kelas ini dulu."); return; }
+    const row = { id: genId(), name: c, owner_id: profile.id, wali_kelas_id: profile.id, jurusan_id: newClassJurusan };
     const { error, offline } = await offlineWrite("classes", "insert", row);
     if (error) return notify("Gagal: " + error.message);
     setClasses((prev) => [...prev, row].sort((a, b) => a.name.localeCompare(b.name)));
     if (!activeClassId) setActiveClassId(row.id);
     setNewClass("");
     notify(offline ? "Kelas tersimpan offline, akan disinkron otomatis." : "Kelas ditambahkan.");
+  };
+
+  const setClassJurusan = async (c, jurusanId) => {
+    setClasses((prev) => prev.map((x) => x.id === c.id ? { ...x, jurusan_id: jurusanId } : x));
+    const { error } = await offlineWrite("classes", "update", { jurusan_id: jurusanId }, { match: { id: c.id } });
+    if (error) notify("Gagal: " + error.message);
   };
 
   const startEditClass = (c) => { setEditingClassId(c.id); setEditingClassName(c.name); };
@@ -1020,6 +1098,13 @@ function SiswaTab({ profile, classes, setClasses, reloadClasses, activeClassId, 
                 <>
                   <span className="text-sm font-medium" style={{ color: INK }}>{c.name}</span>
                   <div className="flex items-center gap-1.5 shrink-0">
+                    <select value={c.jurusan_id || ""} onChange={(e) => setClassJurusan(c, e.target.value || null)}
+                      className="text-xs px-2 py-1.5 rounded-md" style={{ background: BG, color: c.jurusan_id ? INK : MUTED }}>
+                      <option value="">— Jurusan —</option>
+                      {jurusanList.map((j) => (
+                        <option key={j.id} value={j.id}>{j.name}</option>
+                      ))}
+                    </select>
                     <button onClick={() => startEditClass(c)} className="w-8 h-8 rounded-md flex items-center justify-center" style={{ background: BG }}><Pencil size={13} color={MUTED} /></button>
                     <button onClick={() => deleteClass(c)} className="w-8 h-8 rounded-md flex items-center justify-center" style={{ background: "#FBEAEC" }}><Trash2 size={13} color={RED} /></button>
                   </div>
@@ -1028,8 +1113,15 @@ function SiswaTab({ profile, classes, setClasses, reloadClasses, activeClassId, 
             </div>
           ))}
         </div>
-        <div className="flex gap-2">
-          <input value={newClass} onChange={(e) => setNewClass(e.target.value)} placeholder="Nama kelas, mis. 8C" className="text-sm px-3 py-2 rounded-lg flex-1 max-w-xs" style={{ background: BG, color: INK }} onKeyDown={(e) => e.key === "Enter" && addClass()} />
+        <div className="flex gap-2 flex-wrap">
+          <input value={newClass} onChange={(e) => setNewClass(e.target.value)} placeholder="Nama kelas, mis. 12 DKV 1" className="text-sm px-3 py-2 rounded-lg flex-1 max-w-xs" style={{ background: BG, color: INK }} onKeyDown={(e) => e.key === "Enter" && addClass()} />
+          <select value={newClassJurusan} onChange={(e) => setNewClassJurusan(e.target.value)}
+            className="text-sm px-3 py-2 rounded-lg" style={{ background: BG, color: newClassJurusan ? INK : MUTED }}>
+            <option value="">Pilih jurusan</option>
+            {jurusanList.map((j) => (
+              <option key={j.id} value={j.id}>{j.name}</option>
+            ))}
+          </select>
           <button onClick={addClass} className="px-3.5 py-2 rounded-lg text-sm font-semibold text-white flex items-center gap-1.5" style={{ background: NAVY }}><Plus size={14} /> Tambah</button>
         </div>
       </Card>
