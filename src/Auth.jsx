@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { supabase } from "./supabaseClient.js";
 import { NAVY, NAVY2, ORANGE, MUTED, GREEN } from "./shared.jsx";
 import { Loader2 } from "lucide-react";
@@ -10,10 +10,19 @@ export default function Auth() {
   const [name, setName] = useState("");
   const [isGuru, setIsGuru] = useState(true);
   const [isWaliKelas, setIsWaliKelas] = useState(false);
+  const [isKepalaProgram, setIsKepalaProgram] = useState(false);
   const [subject, setSubject] = useState("");
+  const [jurusanList, setJurusanList] = useState([]);
+  const [kepalaProgramJurusanId, setKepalaProgramJurusanId] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [info, setInfo] = useState("");
+
+  useEffect(() => {
+    supabase.from("jurusan").select("id, name").order("name").then(({ data }) => {
+      if (data) setJurusanList(data);
+    });
+  }, []);
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -38,8 +47,9 @@ export default function Auth() {
     e.preventDefault();
     setErr(""); setBusy(true);
     if (!name.trim()) { setErr("Nama wajib diisi."); setBusy(false); return; }
-    if (!isGuru && !isWaliKelas) { setErr("Pilih minimal satu peran: Guru Mapel atau Wali Kelas."); setBusy(false); return; }
+    if (!isGuru && !isWaliKelas && !isKepalaProgram) { setErr("Pilih minimal satu peran: Guru Mapel, Wali Kelas, atau Kepala Program."); setBusy(false); return; }
     if (isGuru && !subject.trim()) { setErr("Mata pelajaran wajib diisi."); setBusy(false); return; }
+    if (isKepalaProgram && !kepalaProgramJurusanId) { setErr("Pilih jurusan yang akan Anda pantau."); setBusy(false); return; }
 
     const { data, error } = await supabase.auth.signUp({ email, password });
     if (error) { setErr(error.message); setBusy(false); return; }
@@ -53,7 +63,9 @@ export default function Auth() {
     }
     const { error: profileErr } = await supabase.from("profiles").insert({
       id: userId, name: name.trim(), is_guru: isGuru, is_wali_kelas: isWaliKelas,
+      is_kepala_program: isKepalaProgram,
       subject: isGuru ? subject.trim() : null,
+      kepala_program_jurusan_id: isKepalaProgram ? kepalaProgramJurusanId : null,
     });
     if (profileErr) { setErr(profileErr.message); setBusy(false); return; }
     setBusy(false);
@@ -69,7 +81,7 @@ export default function Auth() {
       <div className="w-full max-w-sm">
         <div className="text-center mb-7">
           <div className="text-white font-bold text-2xl">R3 EDU</div>
-          <div className="text-sm mt-1" style={{ color: "#93A0BE" }}>Guru Mapel & Wali Kelas</div>
+          <div className="text-sm mt-1" style={{ color: "#93A0BE" }}>Guru Mapel · Wali Kelas · Kepala Program</div>
         </div>
 
         <div className="rounded-xl p-6" style={{ background: "white" }}>
@@ -112,7 +124,7 @@ export default function Auth() {
                 <>
                   <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nama lengkap"
                     className="text-sm px-3 py-2.5 rounded-lg" style={{ background: "#F4F5F7", color: NAVY }} required />
-                  <div className="text-xs font-semibold" style={{ color: MUTED }}>Peran (boleh pilih keduanya):</div>
+                  <div className="text-xs font-semibold" style={{ color: MUTED }}>Peran (boleh pilih lebih dari satu):</div>
                   <div className="flex gap-2">
                     <button type="button" onClick={() => setIsGuru((v) => !v)}
                       className="flex-1 py-2 rounded-lg text-xs font-bold border"
@@ -125,9 +137,23 @@ export default function Auth() {
                       {isWaliKelas ? "✓ " : ""}Wali Kelas
                     </button>
                   </div>
+                  <button type="button" onClick={() => setIsKepalaProgram((v) => !v)}
+                    className="w-full py-2 rounded-lg text-xs font-bold border"
+                    style={{ background: isKepalaProgram ? ORANGE : "white", color: isKepalaProgram ? "white" : MUTED, borderColor: isKepalaProgram ? ORANGE : "#E7E9EE" }}>
+                    {isKepalaProgram ? "✓ " : ""}Kepala Program
+                  </button>
                   {isGuru && (
                     <input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Mata pelajaran, mis. PJOK"
                       className="text-sm px-3 py-2.5 rounded-lg" style={{ background: "#F4F5F7", color: NAVY }} required />
+                  )}
+                  {isKepalaProgram && (
+                    <select value={kepalaProgramJurusanId} onChange={(e) => setKepalaProgramJurusanId(e.target.value)}
+                      className="text-sm px-3 py-2.5 rounded-lg" style={{ background: "#F4F5F7", color: NAVY }} required>
+                      <option value="">Pilih jurusan yang dipantau</option>
+                      {jurusanList.map((j) => (
+                        <option key={j.id} value={j.id}>{j.name}</option>
+                      ))}
+                    </select>
                   )}
                 </>
               )}
