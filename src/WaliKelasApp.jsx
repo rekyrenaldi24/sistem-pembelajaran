@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
-import { supabase } from "./supabaseClient.js";
+import { supabase, createTempAuthClient } from "./supabaseClient.js";
 import {
   NAVY, NAVY2, ORANGE, BG, INK, MUTED, GREEN, RED, AMBER,
   ATT_STATUSES, todayStr, exportToExcel, downloadStudentTemplate, parseStudentsExcel, sha256Hex,
@@ -7,7 +7,7 @@ import {
 } from "./shared.jsx";
 import { offlineWrite, genId } from "./offlineSync.js";
 import {
-  CalendarCheck, StickyNote, PiggyBank, Users, LogOut, Plus, Trash2, Download, Wallet, Pencil, Repeat, FileDown, Upload, History, ClipboardList, Save, Lock, BookOpen,
+  CalendarCheck, StickyNote, PiggyBank, Users, LogOut, Plus, Trash2, Download, Wallet, Pencil, Repeat, FileDown, Upload, History, ClipboardList, Save, Lock, BookOpen, UserPlus,
 } from "lucide-react";
 import AuditLogTab from "./AuditLog.jsx";
 
@@ -18,6 +18,7 @@ const NAV = [
   { key: "biodata", label: "Biodata Siswa", icon: ClipboardList },
   { key: "tabungan", label: "Tabungan", icon: PiggyBank },
   { key: "siswa", label: "Kelas & Siswa", icon: Users },
+  { key: "akun_siswa", label: "Akun Siswa", icon: UserPlus },
   { key: "riwayat", label: "Riwayat Aktivitas", icon: History },
 ];
 
@@ -125,6 +126,7 @@ export default function WaliKelasApp({ profile, onLogout, onSwitchRole }) {
         {tab === "biodata" && <BiodataTab profile={profile} classes={myClasses} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} notify={notify} />}
         {tab === "tabungan" && <TabunganTab profile={profile} classes={myClasses} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} notify={notify} activeClass={activeClass} />}
         {tab === "siswa" && <SiswaTab profile={profile} classes={myClasses} setClasses={setClasses} reloadClasses={loadClasses} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} setStudents={setStudents} notify={notify} />}
+        {tab === "akun_siswa" && <AkunSiswaTab profile={profile} classes={myClasses} activeClassId={activeClassId} setActiveClassId={setActiveClassId} notify={notify} />}
         {tab === "riwayat" && <AuditLogTab profile={profile} />}
       </main>
       <Toast message={toast} onClose={() => setToast("")} />
@@ -133,7 +135,8 @@ export default function WaliKelasApp({ profile, onLogout, onSwitchRole }) {
 }
 
 // ================= ABSENSI KELAS =================
-function AbsensiTab({ profile, classes, activeClassId, setActiveClassId, students, notify, activeClass }) {
+export function AbsensiTab({ profile, classes, activeClassId, setActiveClassId, students, notify, activeClass, ownerId }) {
+  const owner = ownerId || profile.id;
   const [date, setDate] = useState(todayStr());
   const [record, setRecord] = useState({});
   const [expandedAtt, setExpandedAtt] = useState({});
@@ -142,22 +145,22 @@ function AbsensiTab({ profile, classes, activeClassId, setActiveClassId, student
 
   useEffect(() => {
     if (!students.length) { setRecord({}); return; }
-    supabase.from("homeroom_attendance").select("student_id,status").eq("wali_kelas_id", profile.id).eq("date", date)
+    supabase.from("homeroom_attendance").select("student_id,status").eq("wali_kelas_id", owner).eq("date", date)
       .in("student_id", students.map((s) => s.id))
       .then(({ data }) => {
         const rec = {}; (data || []).forEach((r) => { rec[r.student_id] = r.status; });
         setRecord(rec);
       });
-  }, [activeClassId, date, students, profile.id]);
+  }, [activeClassId, date, students, owner]);
 
   const loadRecap = useCallback(async () => {
     if (!students.length) { setAllRecords([]); setLoadingRecap(false); return; }
     setLoadingRecap(true);
-    const { data } = await supabase.from("homeroom_attendance").select("student_id,status,date").eq("wali_kelas_id", profile.id)
+    const { data } = await supabase.from("homeroom_attendance").select("student_id,status,date").eq("wali_kelas_id", owner)
       .in("student_id", students.map((s) => s.id));
     setAllRecords(data || []);
     setLoadingRecap(false);
-  }, [students, profile.id]);
+  }, [students, owner]);
 
   useEffect(() => { loadRecap(); }, [loadRecap, record]);
 
@@ -166,7 +169,7 @@ function AbsensiTab({ profile, classes, activeClassId, setActiveClassId, student
     if (isUndo) {
       setRecord((r) => { const next = { ...r }; delete next[studentId]; return next; });
       const { error, offline } = await offlineWrite("homeroom_attendance", "delete", null, {
-        match: { student_id: studentId, wali_kelas_id: profile.id, date },
+        match: { student_id: studentId, wali_kelas_id: owner, date },
       });
       if (error) notify("Gagal: " + error.message);
       else if (offline) notify("Tersimpan offline, akan disinkron otomatis.");
@@ -176,7 +179,7 @@ function AbsensiTab({ profile, classes, activeClassId, setActiveClassId, student
     setRecord((r) => ({ ...r, [studentId]: status }));
     const { error, offline } = await offlineWrite(
       "homeroom_attendance", "upsert",
-      { student_id: studentId, wali_kelas_id: profile.id, date, status },
+      { student_id: studentId, wali_kelas_id: owner, date, status },
       { onConflict: "student_id,date" }
     );
     if (error) notify("Gagal: " + error.message);
@@ -184,7 +187,7 @@ function AbsensiTab({ profile, classes, activeClassId, setActiveClassId, student
     loadRecap();
   };
   const markAll = async (status) => {
-    const rows = students.map((s) => ({ student_id: s.id, wali_kelas_id: profile.id, date, status }));
+    const rows = students.map((s) => ({ student_id: s.id, wali_kelas_id: owner, date, status }));
     const { error, offline } = await offlineWrite("homeroom_attendance", "upsert", rows, { onConflict: "student_id,date" });
     if (error) return notify("Gagal: " + error.message);
     const rec = {}; students.forEach((s) => { rec[s.id] = status; });
@@ -195,7 +198,7 @@ function AbsensiTab({ profile, classes, activeClassId, setActiveClassId, student
   const clearAll = async () => {
     if (!confirm(`Hapus semua tanda absensi tanggal ${date} untuk kelas ini?`)) return;
     const { error, offline } = await offlineWrite("homeroom_attendance", "delete", null, {
-      match: { wali_kelas_id: profile.id, date },
+      match: { wali_kelas_id: owner, date },
       inFilter: { column: "student_id", values: students.map((s) => s.id) },
     });
     if (error) return notify("Gagal: " + error.message);
@@ -331,7 +334,8 @@ function AbsensiTab({ profile, classes, activeClassId, setActiveClassId, student
 }
 
 // ================= CATATAN =================
-function CatatanTab({ profile, classes, activeClassId, setActiveClassId, students, notify }) {
+export function CatatanTab({ profile, classes, activeClassId, setActiveClassId, students, notify, ownerId }) {
+  const owner = ownerId || profile.id;
   const [studentId, setStudentId] = useState("");
   const [content, setContent] = useState("");
   const [eventDate, setEventDate] = useState(todayStr());
@@ -341,16 +345,16 @@ function CatatanTab({ profile, classes, activeClassId, setActiveClassId, student
 
   const loadNotes = useCallback(async () => {
     if (!students.length) { setNotes([]); return; }
-    const { data } = await supabase.from("notes").select("*").eq("wali_kelas_id", profile.id)
+    const { data } = await supabase.from("notes").select("*").eq("wali_kelas_id", owner)
       .in("student_id", students.map((s) => s.id)).order("date", { ascending: false }).limit(100);
     setNotes(data || []);
-  }, [students, profile.id]);
+  }, [students, owner]);
 
   useEffect(() => { loadNotes(); }, [loadNotes]);
 
   const addNote = async () => {
     if (!studentId || !content.trim()) return;
-    const row = { id: genId(), student_id: studentId, wali_kelas_id: profile.id, content: content.trim(), date: eventDate };
+    const row = { id: genId(), student_id: studentId, wali_kelas_id: owner, content: content.trim(), date: eventDate };
     const { error, offline } = await offlineWrite("notes", "insert", row);
     if (error) return notify("Gagal: " + error.message);
     setNotes((n) => [row, ...n]);
@@ -690,7 +694,8 @@ function BiodataTab({ profile, classes, activeClassId, setActiveClassId, student
 }
 
 // ================= TABUNGAN =================
-function TabunganTab({ profile, classes, activeClassId, setActiveClassId, students, notify, activeClass }) {
+export function TabunganTab({ profile, classes, activeClassId, setActiveClassId, students, notify, activeClass, ownerId }) {
+  const owner = ownerId || profile.id;
   const [studentId, setStudentId] = useState("");
   const [type, setType] = useState("setor");
   const [category, setCategory] = useState(SAVING_CATEGORIES[0]);
@@ -705,16 +710,16 @@ function TabunganTab({ profile, classes, activeClassId, setActiveClassId, studen
 
   const loadLog = useCallback(async () => {
     if (!students.length) { setLog([]); return; }
-    const { data } = await supabase.from("savings").select("*").eq("wali_kelas_id", profile.id)
+    const { data } = await supabase.from("savings").select("*").eq("wali_kelas_id", owner)
       .in("student_id", students.map((s) => s.id)).order("date", { ascending: true }).limit(1000);
     setLog(data || []);
-  }, [students, profile.id]);
+  }, [students, owner]);
 
   useEffect(() => { loadLog(); }, [loadLog]);
 
   const addEntry = async () => {
     if (!studentId || !amount) return;
-    const row = { id: genId(), student_id: studentId, wali_kelas_id: profile.id, type, category, amount: Number(amount), note: note.trim() || null, date: txDate };
+    const row = { id: genId(), student_id: studentId, wali_kelas_id: owner, type, category, amount: Number(amount), note: note.trim() || null, date: txDate };
     const { error, offline } = await offlineWrite("savings", "insert", row);
     if (error) return notify("Gagal: " + error.message);
     setLog((l) => [...l, row]);
@@ -927,6 +932,98 @@ function TabunganTab({ profile, classes, activeClassId, setActiveClassId, studen
 }
 
 // ================= KELAS & SISWA =================
+// ================= AKUN SISWA (SEKRETARIS KELAS) =================
+function AkunSiswaTab({ profile, classes, activeClassId, setActiveClassId, notify }) {
+  const [accounts, setAccounts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [creating, setCreating] = useState(false);
+
+  const loadAccounts = useCallback(async () => {
+    if (!activeClassId) { setAccounts([]); setLoading(false); return; }
+    setLoading(true);
+    const { data } = await supabase.from("profiles").select("id,name,created_at")
+      .eq("is_siswa", true).eq("siswa_class_id", activeClassId).order("created_at", { ascending: false });
+    setAccounts(data || []);
+    setLoading(false);
+  }, [activeClassId]);
+
+  useEffect(() => { loadAccounts(); }, [loadAccounts]);
+
+  const createAccount = async () => {
+    if (!activeClassId) return notify("Pilih kelas dulu.");
+    const em = email.trim();
+    if (!em || !em.includes("@")) return notify("Email tidak valid.");
+    if (password.length < 6) return notify("Password minimal 6 karakter.");
+    setCreating(true);
+    const activeClassName = classes.find((c) => c.id === activeClassId)?.name || "";
+    // Client sementara: supaya sesi login Wali Kelas yang sedang aktif tidak
+    // ikut tertimpa oleh sesi akun Siswa yang baru dibuat.
+    const temp = createTempAuthClient();
+    const { data: signUpData, error: signUpErr } = await temp.auth.signUp({ email: em, password });
+    if (signUpErr) { setCreating(false); return notify("Gagal membuat akun: " + signUpErr.message); }
+    const userId = signUpData?.user?.id;
+    if (!userId) { setCreating(false); return notify("Gagal membuat akun (tidak ada user id)."); }
+    const { error: profileErr } = await temp.from("profiles").insert({
+      id: userId, name: `Sekretaris Kelas ${activeClassName}`,
+      is_guru: false, is_wali_kelas: false, is_kepala_program: false, is_siswa: true,
+      siswa_class_id: activeClassId, approved: true,
+    });
+    await temp.auth.signOut();
+    setCreating(false);
+    if (profileErr) return notify("Akun dibuat tapi profil gagal disimpan: " + profileErr.message);
+    setEmail(""); setPassword("");
+    notify("Akun Siswa (sekretaris) berhasil dibuat untuk kelas ini.");
+    loadAccounts();
+  };
+
+  return (
+    <div>
+      <PageHeader eyebrow="Wali Kelas" title="Akun Siswa (Sekretaris Kelas)" right={<ClassPicker classes={classes} value={activeClassId} onChange={setActiveClassId} />} />
+      <Card className="mb-5">
+        <div className="text-sm font-bold mb-1" style={{ color: INK }}>Buat Akun Baru</div>
+        <div className="text-xs mb-3" style={{ color: MUTED }}>
+          Akun ini dipegang sekretaris kelas untuk mengisi Absensi Kelas, Tabungan, dan Catatan — khusus kelas yang sedang dipilih di atas.
+          Login-nya terpisah dari akun Bapak/Ibu sendiri, jadi bisa dipakai bersamaan.
+        </div>
+        <div className="flex flex-wrap gap-2 mb-2">
+          <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email untuk akun ini" className="text-sm px-3 py-2 rounded-lg flex-1 min-w-[200px]" style={{ background: BG, color: INK }} />
+          <input value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password (min. 6 karakter)" type="text" className="text-sm px-3 py-2 rounded-lg min-w-[200px]" style={{ background: BG, color: INK }} />
+          <button onClick={createAccount} disabled={creating || !activeClassId}
+            className="px-3.5 py-2 rounded-lg text-sm font-semibold text-white flex items-center gap-1.5" style={{ background: NAVY, opacity: creating || !activeClassId ? 0.6 : 1 }}>
+            <UserPlus size={14} /> {creating ? "Membuat…" : "Buat Akun"}
+          </button>
+        </div>
+        <div className="text-xs px-3 py-2 rounded-lg" style={{ background: "#FFF8EC", color: "#9A6B12" }}>
+          <b>Tips:</b> kalau tidak punya email khusus untuk sekretaris, pakai email Bapak/Ibu sendiri dengan tambahan tanda "+", contoh <code>emailanda+sekretaris12dkv1@gmail.com</code> — email tetap masuk ke kotak masuk Bapak/Ibu, tapi Supabase menganggapnya alamat berbeda. Ini penting supaya kalau password lupa, masih bisa dipulihkan lewat menu "Lupa Password".
+          Simpan email &amp; password ini baik-baik dan berikan ke sekretaris kelasnya — tidak ditampilkan lagi setelah ini.
+        </div>
+      </Card>
+      <Card>
+        <div className="text-sm font-bold mb-3" style={{ color: INK }}>Akun yang Sudah Dibuat untuk Kelas Ini</div>
+        {loading ? (
+          <div className="text-xs" style={{ color: MUTED }}>Memuat…</div>
+        ) : accounts.length === 0 ? (
+          <EmptyState icon={UserPlus} text="Belum ada akun sekretaris untuk kelas ini." />
+        ) : (
+          <div className="flex flex-col divide-y" style={{ borderColor: "#EEF0F3" }}>
+            {accounts.map((a) => (
+              <div key={a.id} className="flex items-center justify-between py-2.5">
+                <span className="text-sm" style={{ color: INK }}>{a.name}</span>
+                <span className="text-xs" style={{ color: MUTED }}>dibuat {a.created_at?.slice(0, 10)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="text-xs mt-3" style={{ color: MUTED }}>
+          Untuk menghapus/menonaktifkan akun sekretaris, hubungi Admin (lewat Supabase langsung) — belum ada tombol hapus di sini.
+        </div>
+      </Card>
+    </div>
+  );
+}
+
 // ================= ABSEN PER MATA PELAJARAN (read-only, diisi Guru Mapel) =================
 function AbsenMapelTab({ profile, classes, activeClassId, setActiveClassId, students, notify }) {
   const [date, setDate] = useState(todayStr());
@@ -1017,22 +1114,27 @@ function SiswaTab({ profile, classes, setClasses, reloadClasses, activeClassId, 
   };
 
   const setClassJurusan = async (c, jurusanId) => {
-    setClasses((prev) => prev.map((x) => x.id === c.id ? { ...x, jurusan_id: jurusanId } : x));
-    const { error } = await offlineWrite("classes", "update", { jurusan_id: jurusanId }, { match: { id: c.id } });
+    const claim = !c.owner_id ? { owner_id: profile.id, wali_kelas_id: profile.id } : {};
+    setClasses((prev) => prev.map((x) => x.id === c.id ? { ...x, jurusan_id: jurusanId, ...claim } : x));
+    const { error } = await offlineWrite("classes", "update", { jurusan_id: jurusanId, ...claim }, { match: { id: c.id } });
     if (error) notify("Gagal: " + error.message);
+    else if (claim.owner_id) notify("Kelas ini otomatis jadi milik Anda karena tadinya belum ada pemiliknya.");
   };
 
   const startEditClass = (c) => { setEditingClassId(c.id); setEditingClassName(c.name); };
   const saveEditClass = async () => {
     const nm = editingClassName.trim();
     if (!nm) return;
-    const { error, offline } = await offlineWrite("classes", "update", { name: nm }, { match: { id: editingClassId } });
+    const editing = classes.find((c) => c.id === editingClassId);
+    const claim = editing && !editing.owner_id ? { owner_id: profile.id, wali_kelas_id: profile.id } : {};
+    const { error, offline } = await offlineWrite("classes", "update", { name: nm, ...claim }, { match: { id: editingClassId } });
     if (error) return notify("Gagal: " + error.message);
-    setClasses((prev) => prev.map((c) => c.id === editingClassId ? { ...c, name: nm } : c));
+    setClasses((prev) => prev.map((c) => c.id === editingClassId ? { ...c, name: nm, ...claim } : c));
     setEditingClassId(null);
     notify(offline ? "Tersimpan offline, akan disinkron otomatis." : "Nama kelas diperbarui.");
   };
   const deleteClass = async (c) => {
+    if (!c.owner_id) { notify('Kelas ini belum ada pemiliknya. Ubah dulu nama/jurusannya (otomatis mengklaim), baru bisa dihapus.'); return; }
     if (!confirm(`Hapus kelas "${c.name}"? Semua data siswa, absensi, catatan, dan tabungan di kelas ini akan ikut terhapus permanen.`)) return;
     const { error, offline } = await offlineWrite("classes", "delete", null, { match: { id: c.id } });
     if (error) return notify("Gagal: " + error.message);

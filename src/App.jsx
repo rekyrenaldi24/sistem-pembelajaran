@@ -4,6 +4,7 @@ import Auth from "./Auth.jsx";
 import ResetPassword from "./ResetPassword.jsx";
 import GuruApp from "./GuruApp.jsx";
 import WaliKelasApp from "./WaliKelasApp.jsx";
+import SiswaApp from "./SiswaApp.jsx";
 import BiodataFormPublic from "./BiodataFormPublic.jsx";
 import { NAVY, NAVY2, ORANGE, BG, MUTED } from "./shared.jsx";
 import { Loader2, LogOut, Clock, GraduationCap, Users2, BarChart3, Hourglass } from "lucide-react";
@@ -144,9 +145,10 @@ export default function App() {
 
   if (role === "guru") return <GuruApp profile={profile} onLogout={onLogout} onSwitchRole={onSwitchRole} />;
   if (role === "wali_kelas") return <WaliKelasApp profile={profile} onLogout={onLogout} onSwitchRole={onSwitchRole} />;
+  if (role === "siswa") return <SiswaApp profile={profile} onLogout={onLogout} onSwitchRole={onSwitchRole} />;
 
-  // Kepala Program & Sekretaris Kelas (Siswa) sedang disiapkan di tahap berikutnya.
-  const roleLabel = role === "kepala_program" ? "Kepala Program" : "Sekretaris Kelas";
+  // Kepala Program sedang disiapkan di tahap berikutnya.
+  const roleLabel = "Kepala Program";
   return (
     <div className="min-h-screen flex flex-col items-center justify-center gap-4 text-center px-6" style={{ background: BG }}>
       <div className="w-12 h-12 rounded-full flex items-center justify-center mb-1" style={{ background: NAVY + "14" }}>
