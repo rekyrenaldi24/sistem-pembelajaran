@@ -5,9 +5,10 @@ import ResetPassword from "./ResetPassword.jsx";
 import GuruApp from "./GuruApp.jsx";
 import WaliKelasApp from "./WaliKelasApp.jsx";
 import SiswaApp from "./SiswaApp.jsx";
+import KepalaProgramApp from "./KepalaProgramApp.jsx";
 import BiodataFormPublic from "./BiodataFormPublic.jsx";
 import { NAVY, NAVY2, ORANGE, BG, MUTED } from "./shared.jsx";
-import { Loader2, LogOut, Clock, GraduationCap, Users2, BarChart3, Hourglass } from "lucide-react";
+import { Loader2, LogOut, Clock, GraduationCap, Users2, BarChart3 } from "lucide-react";
 
 export default function App() {
   const [session, setSession] = useState(undefined); // undefined = belum tahu, null = belum login
@@ -146,28 +147,5 @@ export default function App() {
   if (role === "guru") return <GuruApp profile={profile} onLogout={onLogout} onSwitchRole={onSwitchRole} />;
   if (role === "wali_kelas") return <WaliKelasApp profile={profile} onLogout={onLogout} onSwitchRole={onSwitchRole} />;
   if (role === "siswa") return <SiswaApp profile={profile} onLogout={onLogout} onSwitchRole={onSwitchRole} />;
-
-  // Kepala Program sedang disiapkan di tahap berikutnya.
-  const roleLabel = "Kepala Program";
-  return (
-    <div className="min-h-screen flex flex-col items-center justify-center gap-4 text-center px-6" style={{ background: BG }}>
-      <div className="w-12 h-12 rounded-full flex items-center justify-center mb-1" style={{ background: NAVY + "14" }}>
-        <Hourglass size={22} color={NAVY} />
-      </div>
-      <div className="text-base font-bold" style={{ color: NAVY }}>Menu {roleLabel} Segera Hadir</div>
-      <div className="text-sm max-w-sm" style={{ color: MUTED }}>
-        Akun Anda sudah terdaftar sebagai {roleLabel}, tapi menunya masih dalam pengembangan. Akan aktif di update berikutnya.
-      </div>
-      <div className="flex gap-3">
-        {canSwitchRole && (
-          <button onClick={onSwitchRole} className="text-xs font-bold underline" style={{ color: NAVY }}>
-            Ganti Peran
-          </button>
-        )}
-        <button onClick={onLogout} className="text-xs font-bold underline" style={{ color: NAVY }}>
-          Keluar
-        </button>
-      </div>
-    </div>
-  );
+  return <KepalaProgramApp profile={profile} onLogout={onLogout} onSwitchRole={onSwitchRole} />;
 }
