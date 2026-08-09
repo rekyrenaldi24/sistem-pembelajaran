@@ -1,14 +1,94 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { supabase } from "./supabaseClient.js";
 import {
-  NAVY, NAVY2, BG, INK, MUTED, ATT_STATUSES, todayStr, PageHeader, Card, EmptyState,
+  NAVY, NAVY2, BG, INK, MUTED, ATT_STATUSES, todayStr, PageHeader, Card, EmptyState, Toast,
 } from "./shared.jsx";
-import { CalendarCheck, PiggyBank, LogOut, Repeat } from "lucide-react";
+import { CalendarCheck, PiggyBank, LogOut, Repeat, ListChecks, Plus, Trash2 } from "lucide-react";
+import { genId } from "./offlineSync.js";
 
 const NAV = [
+  { key: "kelola_kelas", label: "Kelola Kelas", icon: ListChecks },
   { key: "absensi", label: "Rekap Absensi", icon: CalendarCheck },
   { key: "tabungan", label: "Rekap Tabungan", icon: PiggyBank },
 ];
+
+// ================= KELOLA KELAS (tambah/hapus kelas dalam jurusan ini) =================
+function KelolaKelasTab({ profile, classes, notify, reloadClasses }) {
+  const [newName, setNewName] = useState("");
+  const [ownerNames, setOwnerNames] = useState({}); // { [owner_id]: name }
+  const [creating, setCreating] = useState(false);
+
+  useEffect(() => {
+    const ownerIds = [...new Set(classes.map((c) => c.owner_id).filter(Boolean))];
+    if (ownerIds.length === 0) { setOwnerNames({}); return; }
+    supabase.from("profiles").select("id,name").in("id", ownerIds).then(({ data }) => {
+      const map = {};
+      (data || []).forEach((p) => { map[p.id] = p.name; });
+      setOwnerNames(map);
+    });
+  }, [classes]);
+
+  const addClass = async () => {
+    const name = newName.trim();
+    if (!name) return;
+    setCreating(true);
+    const row = { id: genId(), name, jurusan_id: profile.kepala_program_jurusan_id, owner_id: null };
+    const { error } = await supabase.from("classes").insert(row);
+    setCreating(false);
+    if (error) return notify("Gagal: " + error.message);
+    setNewName("");
+    notify("Kelas ditambahkan. Wali kelas sekarang bisa memilihnya.");
+    reloadClasses();
+  };
+
+  const deleteClass = async (c) => {
+    if (!confirm(`Hapus kelas "${c.name}"? Semua data siswa, absensi, dan nilai di kelas ini akan ikut terhapus permanen.`)) return;
+    const { error } = await supabase.from("classes").delete().eq("id", c.id);
+    if (error) return notify("Gagal: " + error.message);
+    notify("Kelas dihapus.");
+    reloadClasses();
+  };
+
+  return (
+    <div>
+      <PageHeader eyebrow="Kepala Program" title="Kelola Kelas" />
+      <Card className="mb-5">
+        <div className="text-sm font-bold mb-1" style={{ color: INK }}>Tambah Kelas Baru</div>
+        <div className="text-xs mb-3" style={{ color: MUTED }}>
+          Kelas yang dibuat di sini otomatis masuk jurusan Anda. Wali kelas nanti tinggal MEMILIH kelas ini untuk diampu — tidak perlu bikin sendiri.
+        </div>
+        <div className="flex gap-2">
+          <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Nama kelas, mis. 12 DKV 1" className="text-sm px-3 py-2 rounded-lg flex-1 max-w-xs" style={{ background: BG, color: INK }} onKeyDown={(e) => e.key === "Enter" && addClass()} />
+          <button onClick={addClass} disabled={creating} className="px-3.5 py-2 rounded-lg text-sm font-semibold text-white flex items-center gap-1.5" style={{ background: NAVY, opacity: creating ? 0.6 : 1 }}><Plus size={14} /> Tambah</button>
+        </div>
+      </Card>
+      <Card>
+        <div className="text-sm font-bold mb-3" style={{ color: INK }}>Semua Kelas di Jurusan Ini</div>
+        {classes.length === 0 ? (
+          <EmptyState icon={ListChecks} text="Belum ada kelas di jurusan ini." />
+        ) : (
+          <div className="flex flex-col divide-y" style={{ borderColor: "#EEF0F3" }}>
+            {classes.map((c) => (
+              <div key={c.id} className="flex items-center justify-between py-2.5 gap-2">
+                <span className="text-sm font-medium" style={{ color: INK }}>{c.name}</span>
+                <div className="flex items-center gap-2">
+                  {c.owner_id ? (
+                    <span className="text-xs font-semibold px-2 py-1 rounded-md" style={{ background: "#EAF7EF", color: "#2E8B57" }}>
+                      Diampu · {ownerNames[c.owner_id] || "…"}
+                    </span>
+                  ) : (
+                    <span className="text-xs font-semibold px-2 py-1 rounded-md" style={{ background: "#FFF4EE", color: "#9A4A22" }}>Belum ada wali kelas</span>
+                  )}
+                  <button onClick={() => deleteClass(c)} className="w-8 h-8 rounded-md flex items-center justify-center" style={{ background: "#FBEAEC" }}><Trash2 size={13} color="#C0392B" /></button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
 
 // ================= REKAP ABSENSI (semua kelas dalam satu jurusan) =================
 function AbsensiRekapTab({ classes }) {
@@ -165,18 +245,25 @@ function TabunganRekapTab({ classes }) {
 }
 
 export default function KepalaProgramApp({ profile, onLogout, onSwitchRole }) {
-  const [tab, setTab] = useState("absensi");
+  const [tab, setTab] = useState("kelola_kelas");
   const [classes, setClasses] = useState([]);
   const [jurusanName, setJurusanName] = useState("");
   const [loading, setLoading] = useState(true);
+  const [toast, setToast] = useState("");
+  const notify = (msg) => { setToast(msg); setTimeout(() => setToast(""), 2500); };
+
+  const reloadClasses = useCallback(async () => {
+    if (!profile.kepala_program_jurusan_id) return;
+    const { data: c } = await supabase.from("classes").select("*").eq("jurusan_id", profile.kepala_program_jurusan_id).order("name");
+    setClasses(c || []);
+  }, [profile.kepala_program_jurusan_id]);
 
   useEffect(() => {
     (async () => {
       if (!profile.kepala_program_jurusan_id) { setLoading(false); return; }
       const { data: j } = await supabase.from("jurusan").select("name").eq("id", profile.kepala_program_jurusan_id).maybeSingle();
       setJurusanName(j?.name || "");
-      const { data: c } = await supabase.from("classes").select("*").eq("jurusan_id", profile.kepala_program_jurusan_id).order("name");
-      setClasses(c || []);
+      await reloadClasses();
       setLoading(false);
     })();
   }, [profile.kepala_program_jurusan_id]);
@@ -239,9 +326,11 @@ export default function KepalaProgramApp({ profile, onLogout, onSwitchRole }) {
       </aside>
 
       <main className="flex-1 min-w-0 p-5 md:p-8">
+        {tab === "kelola_kelas" && <KelolaKelasTab profile={profile} classes={classes} notify={notify} reloadClasses={reloadClasses} />}
         {tab === "absensi" && <AbsensiRekapTab classes={classes} />}
         {tab === "tabungan" && <TabunganRekapTab classes={classes} />}
       </main>
+      <Toast message={toast} onClose={() => setToast("")} />
     </div>
   );
 }

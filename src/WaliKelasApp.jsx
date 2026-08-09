@@ -1121,6 +1121,15 @@ function SiswaTab({ profile, classes, setClasses, reloadClasses, activeClassId, 
     else if (claim.owner_id) notify("Kelas ini otomatis jadi milik Anda karena tadinya belum ada pemiliknya.");
   };
 
+  const claimSpecificClass = async (c) => {
+    const claim = { owner_id: profile.id, wali_kelas_id: profile.id };
+    setClasses((prev) => prev.map((x) => x.id === c.id ? { ...x, ...claim } : x));
+    const { error, offline } = await offlineWrite("classes", "update", claim, { match: { id: c.id } });
+    if (error) return notify("Gagal: " + error.message);
+    setActiveClassId(c.id);
+    notify(offline ? "Tersimpan offline, akan disinkron otomatis." : `Kelas "${c.name}" sekarang Anda ampu.`);
+  };
+
   const startEditClass = (c) => { setEditingClassId(c.id); setEditingClassName(c.name); };
   const saveEditClass = async () => {
     const nm = editingClassName.trim();
@@ -1188,11 +1197,14 @@ function SiswaTab({ profile, classes, setClasses, reloadClasses, activeClassId, 
     <div>
       <PageHeader eyebrow="Data Anda Sendiri" title="Kelas & Siswa" />
       <Card className="mb-5">
-        <div className="text-sm font-bold mb-3" style={{ color: INK }}>Kelas</div>
+        <div className="text-sm font-bold mb-1" style={{ color: INK }}>Kelas</div>
+        <div className="text-xs mb-3" style={{ color: MUTED }}>
+          Kelas dengan badge oranye <b>"Belum diampu"</b> dibuat oleh Kepala Program dan belum ada wali kelasnya — klik <b>"Ampu Kelas Ini"</b> untuk menjadikannya kelas Anda.
+        </div>
         <div className="flex flex-col divide-y mb-4" style={{ borderColor: "#EEF0F3" }}>
-          {classes.length === 0 && <div className="text-xs py-2" style={{ color: MUTED }}>Belum ada kelas.</div>}
+          {classes.length === 0 && <div className="text-xs py-2" style={{ color: MUTED }}>Belum ada kelas. Minta Kepala Program jurusan Anda membuatkannya dulu.</div>}
           {classes.map((c) => (
-            <div key={c.id} className="flex items-center justify-between py-2.5 gap-2">
+            <div key={c.id} className="flex items-center justify-between py-2.5 gap-2 flex-wrap">
               {editingClassId === c.id ? (
                 <>
                   <input value={editingClassName} onChange={(e) => setEditingClassName(e.target.value)}
@@ -1204,7 +1216,12 @@ function SiswaTab({ profile, classes, setClasses, reloadClasses, activeClassId, 
               ) : (
                 <>
                   <span className="text-sm font-medium" style={{ color: INK }}>{c.name}</span>
-                  <div className="flex items-center gap-1.5 shrink-0">
+                  <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
+                    {!c.owner_id && (
+                      <button onClick={() => claimSpecificClass(c)} className="text-xs font-bold px-2.5 py-1.5 rounded-md text-white" style={{ background: ORANGE }}>
+                        Ampu Kelas Ini
+                      </button>
+                    )}
                     <select value={c.jurusan_id || ""} onChange={(e) => setClassJurusan(c, e.target.value || null)}
                       className="text-xs px-2 py-1.5 rounded-md" style={{ background: BG, color: c.jurusan_id ? INK : MUTED }}>
                       <option value="">— Jurusan —</option>
@@ -1220,6 +1237,7 @@ function SiswaTab({ profile, classes, setClasses, reloadClasses, activeClassId, 
             </div>
           ))}
         </div>
+        <div className="text-xs font-semibold mb-2" style={{ color: MUTED }}>Atau buat kelas baru langsung (kalau Kepala Program belum sempat membuatkannya):</div>
         <div className="flex gap-2 flex-wrap">
           <input value={newClass} onChange={(e) => setNewClass(e.target.value)} placeholder="Nama kelas, mis. 12 DKV 1" className="text-sm px-3 py-2 rounded-lg flex-1 max-w-xs" style={{ background: BG, color: INK }} onKeyDown={(e) => e.key === "Enter" && addClass()} />
           <select value={newClassJurusan} onChange={(e) => setNewClassJurusan(e.target.value)}
