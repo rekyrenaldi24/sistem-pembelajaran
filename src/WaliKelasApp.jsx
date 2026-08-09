@@ -53,20 +53,11 @@ export default function WaliKelasApp({ profile, onLogout, onSwitchRole }) {
       .then(({ data }) => setStudents(data || []));
   }, [activeClassId]);
 
-  const claimClass = async () => {
-    if (!activeClassId) return;
-    const { error, offline: isOff } = await offlineWrite("classes", "update", { wali_kelas_id: profile.id, owner_id: profile.id }, { match: { id: activeClassId } });
-    if (error) return notify("Gagal: " + error.message);
-    setClasses((prev) => prev.map((c) => c.id === activeClassId ? { ...c, wali_kelas_id: profile.id, owner_id: profile.id } : c));
-    notify(isOff ? "Tersimpan offline, akan disinkron otomatis." : "Kelas ini sekarang di bawah perwalian Anda.");
-  };
-
   const activeClass = classes.find((c) => c.id === activeClassId);
-  // Wali kelas cuma boleh LIHAT & KELOLA kelas miliknya sendiri, plus kelas lama
-  // yang belum ada pemiliknya (owner_id kosong) — supaya tombol klaim masih bisa
-  // dipakai. Kelas milik wali kelas LAIN tidak ditampilkan di sini (biar tidak
-  // membingungkan), walaupun secara data memang sudah diblokir oleh RLS.
-  const myClasses = classes.filter((c) => c.owner_id === profile.id || !c.owner_id);
+  // Wali kelas cuma boleh LIHAT & KELOLA kelas yang sudah DITUGASKAN kepadanya
+  // oleh Kepala Program (owner_id = akun ini). Kelas belum ditugaskan atau
+  // milik wali kelas lain tidak akan muncul di sini sama sekali.
+  const myClasses = classes.filter((c) => c.owner_id === profile.id);
 
   return (
     <div className="min-h-screen w-full flex flex-col md:flex-row" style={{ background: BG, fontFamily: "Arial, sans-serif" }}>
@@ -114,18 +105,12 @@ export default function WaliKelasApp({ profile, onLogout, onSwitchRole }) {
 
       <main className="flex-1 min-w-0 p-5 md:p-8">
         <OfflineBanner offline={offline} pending={pending} onSyncNow={syncNow} />
-        {activeClass && activeClass.wali_kelas_id !== profile.id && (
-          <div className="mb-5 flex items-center justify-between flex-wrap gap-2 px-4 py-3 rounded-lg text-sm" style={{ background: "#FFF4EE", color: "#9A4A22" }}>
-            <span>Kelas ini belum punya wali kelas resmi di sistem.</span>
-            <button onClick={claimClass} className="font-bold underline">Jadikan saya wali kelas ini</button>
-          </div>
-        )}
         {tab === "absensi" && <AbsensiTab profile={profile} classes={myClasses} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} notify={notify} activeClass={activeClass} />}
         {tab === "absen_mapel" && <AbsenMapelTab profile={profile} classes={myClasses} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} notify={notify} />}
         {tab === "catatan" && <CatatanTab profile={profile} classes={myClasses} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} notify={notify} />}
         {tab === "biodata" && <BiodataTab profile={profile} classes={myClasses} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} notify={notify} />}
         {tab === "tabungan" && <TabunganTab profile={profile} classes={myClasses} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} notify={notify} activeClass={activeClass} />}
-        {tab === "siswa" && <SiswaTab profile={profile} classes={myClasses} setClasses={setClasses} reloadClasses={loadClasses} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} setStudents={setStudents} notify={notify} />}
+        {tab === "siswa" && <SiswaTab profile={profile} classes={myClasses} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} setStudents={setStudents} notify={notify} />}
         {tab === "akun_siswa" && <AkunSiswaTab profile={profile} classes={myClasses} activeClassId={activeClassId} setActiveClassId={setActiveClassId} notify={notify} />}
         {tab === "riwayat" && <AuditLogTab profile={profile} />}
       </main>
@@ -1087,69 +1072,9 @@ function AbsenMapelTab({ profile, classes, activeClassId, setActiveClassId, stud
 }
 
 // ================= KELAS & SISWA =================
-function SiswaTab({ profile, classes, setClasses, reloadClasses, activeClassId, setActiveClassId, students, setStudents, notify }) {
-  const [newClass, setNewClass] = useState("");
-  const [newClassJurusan, setNewClassJurusan] = useState("");
+function SiswaTab({ profile, classes, activeClassId, setActiveClassId, students, setStudents, notify }) {
   const [name, setName] = useState("");
   const [gender, setGender] = useState("L");
-  const [editingClassId, setEditingClassId] = useState(null);
-  const [editingClassName, setEditingClassName] = useState("");
-  const [jurusanList, setJurusanList] = useState([]);
-
-  useEffect(() => {
-    supabase.from("jurusan").select("id, name").order("name").then(({ data }) => setJurusanList(data || []));
-  }, []);
-
-  const addClass = async () => {
-    const c = newClass.trim();
-    if (!c) return;
-    if (!newClassJurusan) { notify("Pilih jurusan untuk kelas ini dulu."); return; }
-    const row = { id: genId(), name: c, owner_id: profile.id, wali_kelas_id: profile.id, jurusan_id: newClassJurusan };
-    const { error, offline } = await offlineWrite("classes", "insert", row);
-    if (error) return notify("Gagal: " + error.message);
-    setClasses((prev) => [...prev, row].sort((a, b) => a.name.localeCompare(b.name)));
-    if (!activeClassId) setActiveClassId(row.id);
-    setNewClass("");
-    notify(offline ? "Kelas tersimpan offline, akan disinkron otomatis." : "Kelas ditambahkan.");
-  };
-
-  const setClassJurusan = async (c, jurusanId) => {
-    const claim = !c.owner_id ? { owner_id: profile.id, wali_kelas_id: profile.id } : {};
-    setClasses((prev) => prev.map((x) => x.id === c.id ? { ...x, jurusan_id: jurusanId, ...claim } : x));
-    const { error } = await offlineWrite("classes", "update", { jurusan_id: jurusanId, ...claim }, { match: { id: c.id } });
-    if (error) notify("Gagal: " + error.message);
-    else if (claim.owner_id) notify("Kelas ini otomatis jadi milik Anda karena tadinya belum ada pemiliknya.");
-  };
-
-  const claimSpecificClass = async (c) => {
-    const claim = { owner_id: profile.id, wali_kelas_id: profile.id };
-    setClasses((prev) => prev.map((x) => x.id === c.id ? { ...x, ...claim } : x));
-    const { error, offline } = await offlineWrite("classes", "update", claim, { match: { id: c.id } });
-    if (error) return notify("Gagal: " + error.message);
-    setActiveClassId(c.id);
-    notify(offline ? "Tersimpan offline, akan disinkron otomatis." : `Kelas "${c.name}" sekarang Anda ampu.`);
-  };
-
-  const startEditClass = (c) => { setEditingClassId(c.id); setEditingClassName(c.name); };
-  const saveEditClass = async () => {
-    const nm = editingClassName.trim();
-    if (!nm) return;
-    const editing = classes.find((c) => c.id === editingClassId);
-    const claim = editing && !editing.owner_id ? { owner_id: profile.id, wali_kelas_id: profile.id } : {};
-    const { error, offline } = await offlineWrite("classes", "update", { name: nm, ...claim }, { match: { id: editingClassId } });
-    if (error) return notify("Gagal: " + error.message);
-    setClasses((prev) => prev.map((c) => c.id === editingClassId ? { ...c, name: nm, ...claim } : c));
-    setEditingClassId(null);
-    notify(offline ? "Tersimpan offline, akan disinkron otomatis." : "Nama kelas diperbarui.");
-  };
-  const deleteClass = async (c) => {
-    if (!c.owner_id) { notify('Kelas ini belum ada pemiliknya. Ubah dulu nama/jurusannya (otomatis mengklaim), baru bisa dihapus.'); return; }
-    if (!confirm(`Hapus kelas "${c.name}"? Semua data siswa, absensi, catatan, dan tabungan di kelas ini akan ikut terhapus permanen.`)) return;
-    const { error, offline } = await offlineWrite("classes", "delete", null, { match: { id: c.id } });
-    if (error) return notify("Gagal: " + error.message);
-    setClasses((prev) => prev.filter((x) => x.id !== c.id));
-    notify(offline ? "Tersimpan offline, akan disinkron otomatis." : "Kelas dihapus.");
-  };
 
   const addStudent = async () => {
     if (!name.trim() || !activeClassId) return;
@@ -1193,67 +1118,28 @@ function SiswaTab({ profile, classes, setClasses, reloadClasses, activeClassId, 
     setImporting(false);
   };
 
+  if (classes.length === 0) {
+    return (
+      <div>
+        <PageHeader eyebrow="Kelas yang Anda Ampu" title="Kelas & Siswa" />
+        <Card>
+          <EmptyState icon={Users} text="Anda belum ditugaskan ke kelas manapun. Hubungi Kepala Program jurusan Anda untuk ditugaskan ke sebuah kelas." />
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div>
-      <PageHeader eyebrow="Data Anda Sendiri" title="Kelas & Siswa" />
+      <PageHeader eyebrow="Kelas yang Anda Ampu" title="Kelas & Siswa" right={<ClassPicker classes={classes} value={activeClassId} onChange={setActiveClassId} />} />
       <Card className="mb-5">
-        <div className="text-sm font-bold mb-1" style={{ color: INK }}>Kelas</div>
-        <div className="text-xs mb-3" style={{ color: MUTED }}>
-          Kelas dengan badge oranye <b>"Belum diampu"</b> dibuat oleh Kepala Program dan belum ada wali kelasnya — klik <b>"Ampu Kelas Ini"</b> untuk menjadikannya kelas Anda.
-        </div>
-        <div className="flex flex-col divide-y mb-4" style={{ borderColor: "#EEF0F3" }}>
-          {classes.length === 0 && <div className="text-xs py-2" style={{ color: MUTED }}>Belum ada kelas. Minta Kepala Program jurusan Anda membuatkannya dulu.</div>}
-          {classes.map((c) => (
-            <div key={c.id} className="flex items-center justify-between py-2.5 gap-2 flex-wrap">
-              {editingClassId === c.id ? (
-                <>
-                  <input value={editingClassName} onChange={(e) => setEditingClassName(e.target.value)}
-                    className="text-sm px-2.5 py-1.5 rounded-md flex-1" style={{ background: BG, color: INK }}
-                    onKeyDown={(e) => e.key === "Enter" && saveEditClass()} autoFocus />
-                  <button onClick={saveEditClass} className="w-8 h-8 rounded-md flex items-center justify-center" style={{ background: "#EAF7EF" }}>✓</button>
-                  <button onClick={() => setEditingClassId(null)} className="w-8 h-8 rounded-md flex items-center justify-center" style={{ background: BG }}>✕</button>
-                </>
-              ) : (
-                <>
-                  <span className="text-sm font-medium" style={{ color: INK }}>{c.name}</span>
-                  <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
-                    {!c.owner_id && (
-                      <button onClick={() => claimSpecificClass(c)} className="text-xs font-bold px-2.5 py-1.5 rounded-md text-white" style={{ background: ORANGE }}>
-                        Ampu Kelas Ini
-                      </button>
-                    )}
-                    <select value={c.jurusan_id || ""} onChange={(e) => setClassJurusan(c, e.target.value || null)}
-                      className="text-xs px-2 py-1.5 rounded-md" style={{ background: BG, color: c.jurusan_id ? INK : MUTED }}>
-                      <option value="">— Jurusan —</option>
-                      {jurusanList.map((j) => (
-                        <option key={j.id} value={j.id}>{j.name}</option>
-                      ))}
-                    </select>
-                    <button onClick={() => startEditClass(c)} className="w-8 h-8 rounded-md flex items-center justify-center" style={{ background: BG }}><Pencil size={13} color={MUTED} /></button>
-                    <button onClick={() => deleteClass(c)} className="w-8 h-8 rounded-md flex items-center justify-center" style={{ background: "#FBEAEC" }}><Trash2 size={13} color={RED} /></button>
-                  </div>
-                </>
-              )}
-            </div>
-          ))}
-        </div>
-        <div className="text-xs font-semibold mb-2" style={{ color: MUTED }}>Atau buat kelas baru langsung (kalau Kepala Program belum sempat membuatkannya):</div>
-        <div className="flex gap-2 flex-wrap">
-          <input value={newClass} onChange={(e) => setNewClass(e.target.value)} placeholder="Nama kelas, mis. 12 DKV 1" className="text-sm px-3 py-2 rounded-lg flex-1 max-w-xs" style={{ background: BG, color: INK }} onKeyDown={(e) => e.key === "Enter" && addClass()} />
-          <select value={newClassJurusan} onChange={(e) => setNewClassJurusan(e.target.value)}
-            className="text-sm px-3 py-2 rounded-lg" style={{ background: BG, color: newClassJurusan ? INK : MUTED }}>
-            <option value="">Pilih jurusan</option>
-            {jurusanList.map((j) => (
-              <option key={j.id} value={j.id}>{j.name}</option>
-            ))}
-          </select>
-          <button onClick={addClass} className="px-3.5 py-2 rounded-lg text-sm font-semibold text-white flex items-center gap-1.5" style={{ background: NAVY }}><Plus size={14} /> Tambah</button>
+        <div className="text-xs" style={{ color: MUTED }}>
+          Nama &amp; jurusan kelas diatur oleh Kepala Program. Di sini Anda hanya mengelola daftar siswa di kelas yang Anda ampu.
         </div>
       </Card>
       <Card>
         <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
           <div className="text-sm font-bold" style={{ color: INK }}>Siswa</div>
-          <ClassPicker classes={classes} value={activeClassId} onChange={setActiveClassId} />
         </div>
         <div className="flex flex-wrap gap-2 mb-4 pb-4" style={{ borderBottom: "1px solid #EEF0F3" }}>
           <button onClick={downloadStudentTemplate} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold" style={{ background: BG, color: INK }}>
