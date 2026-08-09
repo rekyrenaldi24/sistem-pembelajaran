@@ -25,10 +25,13 @@ function KelolaKelasTab({ profile, classes, notify, reloadClasses }) {
   const [ownerNames, setOwnerNames] = useState({}); // { [owner_id]: name }
   const [creating, setCreating] = useState(false);
   const [assigningId, setAssigningId] = useState(null);
+  const [assignMode, setAssignMode] = useState("baru"); // "baru" | "existing"
   const [waliName, setWaliName] = useState("");
   const [waliEmail, setWaliEmail] = useState("");
   const [waliPassword, setWaliPassword] = useState("");
   const [assigning, setAssigning] = useState(false);
+  const [existingWali, setExistingWali] = useState([]);
+  const [selectedExistingId, setSelectedExistingId] = useState("");
 
   useEffect(() => {
     const ownerIds = [...new Set(classes.map((c) => c.owner_id).filter(Boolean))];
@@ -38,6 +41,10 @@ function KelolaKelasTab({ profile, classes, notify, reloadClasses }) {
       (data || []).forEach((p) => { map[p.id] = p.name; });
       setOwnerNames(map);
     });
+  }, [classes]);
+
+  useEffect(() => {
+    supabase.from("profiles").select("id,name").eq("is_wali_kelas", true).order("name").then(({ data }) => setExistingWali(data || []));
   }, [classes]);
 
   const addClass = async () => {
@@ -63,7 +70,9 @@ function KelolaKelasTab({ profile, classes, notify, reloadClasses }) {
 
   const openAssign = (c) => {
     setAssigningId(c.id);
+    setAssignMode("baru");
     setWaliName(""); setWaliEmail(""); setWaliPassword("");
+    setSelectedExistingId("");
   };
 
   const submitAssign = async (c) => {
@@ -91,6 +100,17 @@ function KelolaKelasTab({ profile, classes, notify, reloadClasses }) {
     if (assignErr) return notify("Akun dibuat tapi gagal ditugaskan ke kelas: " + assignErr.message);
     setAssigningId(null);
     notify(`Akun Wali Kelas untuk "${c.name}" berhasil dibuat & ditugaskan. Simpan email & password ini, lalu berikan ke walinya.`);
+    reloadClasses();
+  };
+
+  const submitAssignExisting = async (c) => {
+    if (!selectedExistingId) return notify("Pilih akun wali kelas dulu.");
+    setAssigning(true);
+    const { error } = await supabase.from("classes").update({ owner_id: selectedExistingId, wali_kelas_id: selectedExistingId }).eq("id", c.id);
+    setAssigning(false);
+    if (error) return notify("Gagal: " + error.message);
+    setAssigningId(null);
+    notify(`Kelas "${c.name}" berhasil ditugaskan.`);
     reloadClasses();
   };
 
@@ -136,20 +156,49 @@ function KelolaKelasTab({ profile, classes, notify, reloadClasses }) {
                 </div>
                 {assigningId === c.id && (
                   <div className="mt-2.5 p-3 rounded-lg flex flex-col gap-2" style={{ background: BG }}>
-                    <div className="text-xs font-semibold" style={{ color: MUTED }}>
-                      {c.owner_id ? `Buat akun BARU untuk menggantikan wali kelas "${c.name}" saat ini:` : `Buat akun Wali Kelas untuk "${c.name}":`}
-                    </div>
-                    <div className="flex gap-2 flex-wrap">
-                      <input value={waliName} onChange={(e) => setWaliName(e.target.value)} placeholder="Nama wali kelas" className="text-sm px-3 py-2 rounded-lg flex-1 min-w-[160px]" style={{ background: "white", color: INK }} />
-                      <input value={waliEmail} onChange={(e) => setWaliEmail(e.target.value)} placeholder="Email untuk akun ini" className="text-sm px-3 py-2 rounded-lg flex-1 min-w-[200px]" style={{ background: "white", color: INK }} />
-                      <input value={waliPassword} onChange={(e) => setWaliPassword(e.target.value)} placeholder="Password (min. 6 karakter)" className="text-sm px-3 py-2 rounded-lg min-w-[180px]" style={{ background: "white", color: INK }} />
-                    </div>
                     <div className="flex gap-2">
-                      <button onClick={() => submitAssign(c)} disabled={assigning} className="px-3.5 py-2 rounded-lg text-sm font-semibold text-white" style={{ background: NAVY, opacity: assigning ? 0.6 : 1 }}>
-                        {assigning ? "Memproses…" : "Buat & Tugaskan"}
-                      </button>
-                      <button onClick={() => setAssigningId(null)} className="px-3.5 py-2 rounded-lg text-sm font-semibold" style={{ background: "white", color: MUTED }}>Batal</button>
+                      <button onClick={() => setAssignMode("baru")} className="text-xs font-bold px-3 py-1.5 rounded-md" style={{ background: assignMode === "baru" ? NAVY : "white", color: assignMode === "baru" ? "white" : MUTED }}>Buat Akun Baru</button>
+                      <button onClick={() => setAssignMode("existing")} className="text-xs font-bold px-3 py-1.5 rounded-md" style={{ background: assignMode === "existing" ? NAVY : "white", color: assignMode === "existing" ? "white" : MUTED }}>Pilih Akun yang Sudah Ada</button>
                     </div>
+
+                    {assignMode === "baru" ? (
+                      <>
+                        <div className="text-xs font-semibold" style={{ color: MUTED }}>
+                          {c.owner_id ? `Buat akun BARU untuk menggantikan wali kelas "${c.name}" saat ini:` : `Buat akun Wali Kelas untuk "${c.name}":`}
+                        </div>
+                        <div className="flex gap-2 flex-wrap">
+                          <input value={waliName} onChange={(e) => setWaliName(e.target.value)} placeholder="Nama wali kelas" className="text-sm px-3 py-2 rounded-lg flex-1 min-w-[160px]" style={{ background: "white", color: INK }} />
+                          <input value={waliEmail} onChange={(e) => setWaliEmail(e.target.value)} placeholder="Email untuk akun ini" className="text-sm px-3 py-2 rounded-lg flex-1 min-w-[200px]" style={{ background: "white", color: INK }} />
+                          <input value={waliPassword} onChange={(e) => setWaliPassword(e.target.value)} placeholder="Password (min. 6 karakter)" className="text-sm px-3 py-2 rounded-lg min-w-[180px]" style={{ background: "white", color: INK }} />
+                        </div>
+                        <div className="flex gap-2">
+                          <button onClick={() => submitAssign(c)} disabled={assigning} className="px-3.5 py-2 rounded-lg text-sm font-semibold text-white" style={{ background: NAVY, opacity: assigning ? 0.6 : 1 }}>
+                            {assigning ? "Memproses…" : "Buat & Tugaskan"}
+                          </button>
+                          <button onClick={() => setAssigningId(null)} className="px-3.5 py-2 rounded-lg text-sm font-semibold" style={{ background: "white", color: MUTED }}>Batal</button>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="text-xs font-semibold" style={{ color: MUTED }}>
+                          Pilih akun Wali Kelas yang sudah pernah dibuat untuk ditugaskan ke "{c.name}":
+                        </div>
+                        <div className="flex gap-2 flex-wrap">
+                          <select value={selectedExistingId} onChange={(e) => setSelectedExistingId(e.target.value)} className="text-sm px-3 py-2 rounded-lg flex-1 min-w-[220px]" style={{ background: "white", color: selectedExistingId ? INK : MUTED }}>
+                            <option value="">— Pilih akun —</option>
+                            {existingWali.map((w) => (
+                              <option key={w.id} value={w.id}>{w.name}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="flex gap-2">
+                          <button onClick={() => submitAssignExisting(c)} disabled={assigning} className="px-3.5 py-2 rounded-lg text-sm font-semibold text-white" style={{ background: NAVY, opacity: assigning ? 0.6 : 1 }}>
+                            {assigning ? "Memproses…" : "Tugaskan"}
+                          </button>
+                          <button onClick={() => setAssigningId(null)} className="px-3.5 py-2 rounded-lg text-sm font-semibold" style={{ background: "white", color: MUTED }}>Batal</button>
+                        </div>
+                      </>
+                    )}
                   </div>
                 )}
               </div>
