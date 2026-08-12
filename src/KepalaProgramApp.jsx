@@ -3,7 +3,7 @@ import { supabase, createTempAuthClient } from "./supabaseClient.js";
 import {
   NAVY, NAVY2, ORANGE, BG, INK, MUTED, ATT_STATUSES, todayStr, PageHeader, Card, EmptyState, Toast, exportToExcel,
 } from "./shared.jsx";
-import { CalendarCheck, PiggyBank, LogOut, Repeat, ListChecks, Plus, Trash2, FileDown, UserPlus } from "lucide-react";
+import { CalendarCheck, PiggyBank, LogOut, Repeat, ListChecks, Plus, Trash2, FileDown, UserPlus, ArrowUpCircle, Archive } from "lucide-react";
 import { genId } from "./offlineSync.js";
 
 const NAV = [
@@ -32,6 +32,15 @@ function KelolaKelasTab({ profile, classes, notify, reloadClasses }) {
   const [assigning, setAssigning] = useState(false);
   const [existingWali, setExistingWali] = useState([]);
   const [selectedExistingId, setSelectedExistingId] = useState("");
+  const [promotingId, setPromotingId] = useState(null);
+  const [newClassName, setNewClassName] = useState("");
+  const [newYearLabel, setNewYearLabel] = useState("");
+  const [promoting, setPromoting] = useState(false);
+  const [showArchive, setShowArchive] = useState(false);
+
+  const activeClasses = classes.filter((c) => !c.archived);
+  const archivedClasses = classes.filter((c) => c.archived);
+  const classNameById = Object.fromEntries(classes.map((c) => [c.id, c.name]));
 
   useEffect(() => {
     const ownerIds = [...new Set(classes.map((c) => c.owner_id).filter(Boolean))];
@@ -61,15 +70,50 @@ function KelolaKelasTab({ profile, classes, notify, reloadClasses }) {
   };
 
   const deleteClass = async (c) => {
-    if (!confirm(`Hapus kelas "${c.name}"? Semua data siswa, absensi, dan nilai di kelas ini akan ikut terhapus permanen.`)) return;
+    if (!confirm(`Hapus PERMANEN kelas "${c.name}"? Semua data siswa, absensi, dan nilai di kelas ini akan ikut terhapus permanen dan TIDAK BISA dikembalikan. Kalau kelas ini sudah lulus / sudah tidak dipakai lagi tapi datanya masih mau disimpan, pakai tombol "Arsipkan" saja, jangan Hapus.`)) return;
     const { error } = await supabase.from("classes").delete().eq("id", c.id);
     if (error) return notify("Gagal: " + error.message);
     notify("Kelas dihapus.");
     reloadClasses();
   };
 
+  // ---------- Naik Tahun Ajaran (promosi kelas) ----------
+  const openPromote = (c) => {
+    setPromotingId(c.id);
+    setAssigningId(null);
+    setNewClassName("");
+    setNewYearLabel("");
+  };
+
+  const submitPromote = async (c) => {
+    const nm = newClassName.trim();
+    if (!nm) return notify("Nama kelas baru wajib diisi, mis. \"11 DKV 1\".");
+    if (!confirm(`Kelas "${c.name}" akan naik jadi "${nm}". Semua nama siswa, biodata, dan saldo tabungan akan dibawa otomatis ke kelas baru. Absensi/poin/nilai/catatan TIDAK dibawa (mulai rekap baru dari nol), tapi tetap tersimpan aman di arsip kelas "${c.name}". Lanjutkan?`)) return;
+    setPromoting(true);
+    const { error } = await supabase.rpc("promosikan_kelas", {
+      p_old_class_id: c.id,
+      p_new_class_name: nm,
+      p_year_label: newYearLabel.trim() || null,
+    });
+    setPromoting(false);
+    if (error) return notify("Gagal naik tahun ajaran: " + error.message);
+    setPromotingId(null);
+    notify(`Berhasil! Kelas "${c.name}" naik jadi "${nm}". Siswa, biodata & saldo tabungan sudah dibawa; absensi/nilai/catatan mulai baru.`);
+    reloadClasses();
+  };
+
+  // ---------- Arsipkan tanpa naik kelas (mis. kelas 12 yang lulus) ----------
+  const archiveClass = async (c) => {
+    if (!confirm(`Arsipkan kelas "${c.name}"? Kelas ini akan disembunyikan dari daftar kelas aktif (cocok untuk kelas yang sudah lulus), tapi semua datanya (siswa, absensi, nilai, catatan, tabungan) tetap tersimpan aman dan bisa dilihat lagi lewat bagian Arsip. Ini BUKAN naik tahun ajaran — tidak ada kelas baru yang dibuat.`)) return;
+    const { error } = await supabase.from("classes").update({ archived: true, archived_at: new Date().toISOString() }).eq("id", c.id);
+    if (error) return notify("Gagal: " + error.message);
+    notify(`Kelas "${c.name}" diarsipkan.`);
+    reloadClasses();
+  };
+
   const openAssign = (c) => {
     setAssigningId(c.id);
+    setPromotingId(null);
     setAssignMode("baru");
     setWaliName(""); setWaliEmail(""); setWaliPassword("");
     setSelectedExistingId("");
@@ -127,20 +171,21 @@ function KelolaKelasTab({ profile, classes, notify, reloadClasses }) {
           <button onClick={addClass} disabled={creating} className="px-3.5 py-2 rounded-lg text-sm font-semibold text-white flex items-center gap-1.5" style={{ background: NAVY, opacity: creating ? 0.6 : 1 }}><Plus size={14} /> Tambah</button>
         </div>
       </Card>
-      <Card>
-        <div className="text-sm font-bold mb-1" style={{ color: INK }}>Semua Kelas di Jurusan Ini</div>
+      <Card className="mb-5">
+        <div className="text-sm font-bold mb-1" style={{ color: INK }}>Kelas Aktif di Jurusan Ini</div>
         <div className="text-xs mb-3" style={{ color: MUTED }}>
           Akun Wali Kelas dibuat &amp; ditugaskan dari sini — wali kelas tidak bisa bikin akun sendiri. Catat email &amp; password yang Anda buat, lalu berikan ke wali kelasnya.
+          Kalau tahun ajaran baru dimulai, pakai tombol <b>Naik Tahun Ajaran</b> di tiap kelas (siswa, biodata &amp; saldo tabungan otomatis dibawa; absensi/nilai/catatan mulai baru).
         </div>
-        {classes.length === 0 ? (
-          <EmptyState icon={ListChecks} text="Belum ada kelas di jurusan ini." />
+        {activeClasses.length === 0 ? (
+          <EmptyState icon={ListChecks} text="Belum ada kelas aktif di jurusan ini." />
         ) : (
           <div className="flex flex-col divide-y" style={{ borderColor: "#EEF0F3" }}>
-            {classes.map((c) => (
+            {activeClasses.map((c) => (
               <div key={c.id} className="py-2.5">
                 <div className="flex items-center justify-between gap-2 flex-wrap">
                   <span className="text-sm font-medium" style={{ color: INK }}>{c.name}</span>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     {c.owner_id ? (
                       <span className="text-xs font-semibold px-2 py-1 rounded-md" style={{ background: "#EAF7EF", color: "#2E8B57" }}>
                         Diampu · {ownerNames[c.owner_id] || "…"}
@@ -151,9 +196,30 @@ function KelolaKelasTab({ profile, classes, notify, reloadClasses }) {
                     <button onClick={() => openAssign(c)} className="text-xs font-bold px-2.5 py-1.5 rounded-md text-white flex items-center gap-1" style={{ background: ORANGE }}>
                       <UserPlus size={13} /> {c.owner_id ? "Ganti" : "Buat Akun"}
                     </button>
-                    <button onClick={() => deleteClass(c)} className="w-8 h-8 rounded-md flex items-center justify-center" style={{ background: "#FBEAEC" }}><Trash2 size={13} color="#C0392B" /></button>
+                    <button onClick={() => openPromote(c)} className="text-xs font-bold px-2.5 py-1.5 rounded-md text-white flex items-center gap-1" style={{ background: NAVY }}>
+                      <ArrowUpCircle size={13} /> Naik Tahun Ajaran
+                    </button>
+                    <button onClick={() => archiveClass(c)} title="Arsipkan (mis. kelas lulus)" className="w-8 h-8 rounded-md flex items-center justify-center" style={{ background: "#EEF0F3" }}><Archive size={13} color={MUTED} /></button>
+                    <button onClick={() => deleteClass(c)} title="Hapus permanen" className="w-8 h-8 rounded-md flex items-center justify-center" style={{ background: "#FBEAEC" }}><Trash2 size={13} color="#C0392B" /></button>
                   </div>
                 </div>
+                {promotingId === c.id && (
+                  <div className="mt-2.5 p-3 rounded-lg flex flex-col gap-2" style={{ background: BG }}>
+                    <div className="text-xs font-semibold" style={{ color: MUTED }}>
+                      Buat kelas baru untuk "{c.name}" naik tahun ajaran. Semua siswa, biodata, dan saldo tabungan di "{c.name}" akan disalin ke kelas baru ini; kelas "{c.name}" sendiri akan diarsipkan (datanya tetap tersimpan).
+                    </div>
+                    <div className="flex gap-2 flex-wrap">
+                      <input value={newClassName} onChange={(e) => setNewClassName(e.target.value)} placeholder='Nama kelas baru, mis. "11 DKV 1"' className="text-sm px-3 py-2 rounded-lg flex-1 min-w-[180px]" style={{ background: "white", color: INK }} />
+                      <input value={newYearLabel} onChange={(e) => setNewYearLabel(e.target.value)} placeholder='Label tahun ajaran (opsional), mis. "2026/2027"' className="text-sm px-3 py-2 rounded-lg flex-1 min-w-[220px]" style={{ background: "white", color: INK }} />
+                    </div>
+                    <div className="flex gap-2">
+                      <button onClick={() => submitPromote(c)} disabled={promoting} className="px-3.5 py-2 rounded-lg text-sm font-semibold text-white" style={{ background: NAVY, opacity: promoting ? 0.6 : 1 }}>
+                        {promoting ? "Memproses…" : "Naikkan Kelas Ini"}
+                      </button>
+                      <button onClick={() => setPromotingId(null)} className="px-3.5 py-2 rounded-lg text-sm font-semibold" style={{ background: "white", color: MUTED }}>Batal</button>
+                    </div>
+                  </div>
+                )}
                 {assigningId === c.id && (
                   <div className="mt-2.5 p-3 rounded-lg flex flex-col gap-2" style={{ background: BG }}>
                     <div className="flex gap-2">
@@ -204,6 +270,35 @@ function KelolaKelasTab({ profile, classes, notify, reloadClasses }) {
               </div>
             ))}
           </div>
+        )}
+      </Card>
+
+      <Card>
+        <button onClick={() => setShowArchive((v) => !v)} className="w-full flex items-center justify-between text-left">
+          <div>
+            <div className="text-sm font-bold" style={{ color: INK }}>Arsip Tahun Ajaran Lalu ({archivedClasses.length})</div>
+            <div className="text-xs mt-0.5" style={{ color: MUTED }}>Kelas yang sudah naik tahun ajaran atau sudah lulus. Read-only, datanya tetap tersimpan aman.</div>
+          </div>
+          <span style={{ color: MUTED, fontSize: 11 }}>{showArchive ? "▾ Tutup" : "▸ Lihat"}</span>
+        </button>
+        {showArchive && (
+          archivedClasses.length === 0 ? (
+            <div className="text-xs mt-3" style={{ color: MUTED }}>Belum ada kelas yang diarsipkan.</div>
+          ) : (
+            <div className="flex flex-col divide-y mt-3" style={{ borderColor: "#EEF0F3" }}>
+              {archivedClasses.map((c) => (
+                <div key={c.id} className="py-2.5 flex items-center justify-between gap-2 flex-wrap">
+                  <div>
+                    <span className="text-sm font-medium" style={{ color: MUTED }}>{c.name}</span>
+                    {c.year_label && <span className="text-xs ml-2" style={{ color: MUTED }}>({c.year_label})</span>}
+                  </div>
+                  <span className="text-xs" style={{ color: MUTED }}>
+                    {c.promoted_to_class_id ? `→ naik jadi "${classNameById[c.promoted_to_class_id] || "…"}"` : "Diarsipkan"}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )
         )}
       </Card>
     </div>
@@ -492,6 +587,9 @@ export default function KepalaProgramApp({ profile, onLogout, onSwitchRole }) {
     const { data: c } = await supabase.from("classes").select("*").eq("jurusan_id", profile.kepala_program_jurusan_id).order("name");
     setClasses(c || []);
   }, [profile.kepala_program_jurusan_id]);
+  // Rekap (Absensi/Rekap Total/Tabungan) hanya pakai kelas AKTIF — kelas
+  // yang sudah diarsipkan/naik tahun ajaran tidak ikut muncul di rekap ini.
+  const activeClasses = classes.filter((c) => !c.archived);
 
   useEffect(() => {
     (async () => {
@@ -562,9 +660,9 @@ export default function KepalaProgramApp({ profile, onLogout, onSwitchRole }) {
 
       <main className="flex-1 min-w-0 p-5 md:p-8">
         {tab === "kelola_kelas" && <KelolaKelasTab profile={profile} classes={classes} notify={notify} reloadClasses={reloadClasses} />}
-        {tab === "absensi" && <AbsensiRekapTab classes={classes} />}
-        {tab === "rekap_total" && <RekapTotalAbsensiTab classes={classes} jurusanName={jurusanName} />}
-        {tab === "tabungan" && <TabunganRekapTab classes={classes} />}
+        {tab === "absensi" && <AbsensiRekapTab classes={activeClasses} />}
+        {tab === "rekap_total" && <RekapTotalAbsensiTab classes={activeClasses} jurusanName={jurusanName} />}
+        {tab === "tabungan" && <TabunganRekapTab classes={activeClasses} />}
       </main>
       <Toast message={toast} onClose={() => setToast("")} />
     </div>

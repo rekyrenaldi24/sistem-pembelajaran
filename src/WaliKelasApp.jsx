@@ -35,7 +35,7 @@ export default function WaliKelasApp({ profile, onLogout, onSwitchRole }) {
   const { pending, offline, syncNow } = useOfflineStatus(notify);
 
   const loadClasses = useCallback(async () => {
-    const { data } = await supabase.from("classes").select("*").order("name");
+    const { data } = await supabase.from("classes").select("*").eq("archived", false).order("name");
     setClasses(data || []);
     const stillExists = data?.some((c) => c.id === activeClassId);
     if (!stillExists) {
