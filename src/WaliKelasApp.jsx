@@ -407,68 +407,7 @@ function Field({ label, value, onChange, placeholder, textarea, rows }) {
 }
 
 function BiodataTab({ profile, classes, activeClassId, setActiveClassId, students, notify }) {
-  // ---------- Gerbang password (memisahkan Biodata dari tab lain) ----------
-  const [checkingLock, setCheckingLock] = useState(true);
-  const [lockRow, setLockRow] = useState(null); // null = belum pernah buat password
-  const [unlocked, setUnlocked] = useState(false);
-  const [pinA, setPinA] = useState("");
-  const [pinB, setPinB] = useState("");
-  const [lockError, setLockError] = useState("");
-  const [lockBusy, setLockBusy] = useState(false);
-
-  useEffect(() => {
-    (async () => {
-      setCheckingLock(true);
-      const cacheKey = `r3edu_lock_cache_${profile.id}`;
-      try {
-        const { data, error } = await supabase.from("biodata_lock").select("*").eq("wali_kelas_id", profile.id).maybeSingle();
-        if (error) throw error;
-        setLockRow(data || null);
-        try { localStorage.setItem(cacheKey, JSON.stringify(data || null)); } catch { /* abaikan */ }
-      } catch (e) {
-        // offline / gagal jaringan -> pakai status kunci yang tersimpan
-        // terakhir kali berhasil online, supaya menu tetap bisa dibuka.
-        try {
-          const cached = localStorage.getItem(cacheKey);
-          setLockRow(cached ? JSON.parse(cached) : null);
-        } catch { setLockRow(null); }
-      }
-      setCheckingLock(false);
-    })();
-  }, [profile.id]);
-
-  const createPin = async () => {
-    setLockError("");
-    if (pinA.length < 4) return setLockError("Password minimal 4 karakter.");
-    if (pinA !== pinB) return setLockError("Konfirmasi password tidak sama.");
-    setLockBusy(true);
-    const hash = await sha256Hex(pinA);
-    const row = { wali_kelas_id: profile.id, pin_hash: hash, updated_at: new Date().toISOString() };
-    const { error, offline } = await offlineWrite("biodata_lock", "upsert", row, { onConflict: "wali_kelas_id" });
-    setLockBusy(false);
-    if (error) return setLockError("Gagal menyimpan password: " + error.message);
-    setLockRow(row);
-    try { localStorage.setItem(`r3edu_lock_cache_${profile.id}`, JSON.stringify(row)); } catch { /* abaikan */ }
-    setUnlocked(true);
-    setPinA(""); setPinB("");
-    notify(offline ? "Password tersimpan offline, akan disinkron otomatis." : "Password Biodata Siswa berhasil dibuat.");
-  };
-
-  const tryUnlock = async () => {
-    setLockError("");
-    setLockBusy(true);
-    const hash = await sha256Hex(pinA);
-    setLockBusy(false);
-    if (hash === lockRow.pin_hash) {
-      setUnlocked(true);
-      setPinA("");
-    } else {
-      setLockError("Password salah.");
-      setPinA("");
-    }
-  };
-
-  // ---------- Isi Biodata (baru dimuat SETELAH unlocked = true) ----------
+  // ---------- Isi Biodata (dimuat langsung, tanpa gerbang password) ----------
   const [studentId, setStudentId] = useState("");
   const [profilesMap, setProfilesMap] = useState({});
   const emptyForm = { address: "", parent_phone: "", family_background: "", economic_notes: "", violation_notes: "", achievement_notes: "", other_notes: "" };
@@ -496,7 +435,7 @@ function BiodataTab({ profile, classes, activeClassId, setActiveClassId, student
     }
   }, [students, profile.id]);
 
-  useEffect(() => { if (unlocked) loadProfiles(); }, [unlocked, loadProfiles]);
+  useEffect(() => { loadProfiles(); }, [loadProfiles]);
 
   useEffect(() => {
     const p = profilesMap[studentId];
@@ -531,74 +470,6 @@ function BiodataTab({ profile, classes, activeClassId, setActiveClassId, student
     const p = profilesMap[id];
     return !!(p && (p.address || p.parent_phone || p.family_background || p.economic_notes || p.violation_notes || p.achievement_notes || p.other_notes));
   };
-
-  // ---------- Render: masih cek status kunci ----------
-  if (checkingLock) {
-    return (
-      <div>
-        <PageHeader eyebrow="Wali Kelas" title="Biodata Siswa" />
-        <Card><div className="text-sm py-6 text-center" style={{ color: MUTED }}>Memuat…</div></Card>
-      </div>
-    );
-  }
-
-  // ---------- Render: belum pernah buat password → suruh buat dulu ----------
-  if (!lockRow) {
-    return (
-      <div>
-        <PageHeader eyebrow="Wali Kelas" title="Biodata Siswa" />
-        <Card className="max-w-md mx-auto text-center">
-          <Lock size={28} className="mx-auto mb-3" style={{ color: ORANGE }} />
-          <div className="text-sm font-bold mb-1" style={{ color: INK }}>Buat Password Biodata Siswa</div>
-          <div className="text-xs mb-4" style={{ color: MUTED }}>
-            Menu ini berisi data pribadi siswa (latar belakang keluarga, kondisi ekonomi, dll).
-            Buat password supaya hanya Anda yang bisa membukanya — misalnya kalau HP/laptop ini
-            juga dipakai sekretaris atau bendahara kelas untuk isi absen dan tabungan.
-          </div>
-          <div className="flex flex-col gap-2 text-left">
-            <input type="password" value={pinA} onChange={(e) => setPinA(e.target.value)} placeholder="Buat password (min. 4 karakter)"
-              className="text-sm px-3 py-2 rounded-lg w-full" style={{ background: BG, color: INK }} />
-            <input type="password" value={pinB} onChange={(e) => setPinB(e.target.value)} placeholder="Ulangi password"
-              className="text-sm px-3 py-2 rounded-lg w-full" style={{ background: BG, color: INK }}
-              onKeyDown={(e) => e.key === "Enter" && createPin()} />
-          </div>
-          {lockError && <div className="text-xs mt-2" style={{ color: RED }}>{lockError}</div>}
-          <button onClick={createPin} disabled={lockBusy}
-            className="mt-4 w-full px-4 py-2 rounded-lg text-sm font-semibold text-white"
-            style={{ background: NAVY, opacity: lockBusy ? 0.6 : 1 }}>
-            {lockBusy ? "Menyimpan…" : "Simpan Password"}
-          </button>
-        </Card>
-      </div>
-    );
-  }
-
-  // ---------- Render: sudah ada password tapi belum dibuka ----------
-  if (!unlocked) {
-    return (
-      <div>
-        <PageHeader eyebrow="Wali Kelas" title="Biodata Siswa" />
-        <Card className="max-w-md mx-auto text-center">
-          <Lock size={28} className="mx-auto mb-3" style={{ color: ORANGE }} />
-          <div className="text-sm font-bold mb-1" style={{ color: INK }}>Menu Terkunci</div>
-          <div className="text-xs mb-4" style={{ color: MUTED }}>Masukkan password untuk membuka Biodata Siswa.</div>
-          <input type="password" autoFocus value={pinA} onChange={(e) => setPinA(e.target.value)} placeholder="Password"
-            className="text-sm px-3 py-2 rounded-lg w-full" style={{ background: BG, color: INK }}
-            onKeyDown={(e) => e.key === "Enter" && tryUnlock()} />
-          {lockError && <div className="text-xs mt-2" style={{ color: RED }}>{lockError}</div>}
-          <button onClick={tryUnlock} disabled={lockBusy}
-            className="mt-4 w-full px-4 py-2 rounded-lg text-sm font-semibold text-white"
-            style={{ background: NAVY, opacity: lockBusy ? 0.6 : 1 }}>
-            {lockBusy ? "Memeriksa…" : "Buka"}
-          </button>
-          <div className="text-xs mt-3" style={{ color: MUTED }}>
-            Lupa password? Buka Supabase → Table Editor → tabel "biodata_lock" → hapus baris milik akun Anda,
-            lalu buka menu ini lagi untuk buat password baru.
-          </div>
-        </Card>
-      </div>
-    );
-  }
 
   const copyFormLink = async () => {
     if (!activeClassId) return;
