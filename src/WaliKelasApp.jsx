@@ -7,7 +7,7 @@ import {
 } from "./shared.jsx";
 import { offlineWrite, genId } from "./offlineSync.js";
 import {
-  CalendarCheck, StickyNote, PiggyBank, Users, LogOut, Plus, Trash2, Download, Wallet, Pencil, Repeat, FileDown, Upload, History, ClipboardList, Save, Lock, BookOpen, UserPlus,
+  CalendarCheck, StickyNote, PiggyBank, Users, LogOut, Plus, Trash2, Download, Wallet, Pencil, Repeat, FileDown, Upload, History, ClipboardList, Save, Lock, BookOpen, UserPlus, CheckCircle2, AlertTriangle,
 } from "lucide-react";
 import AuditLogTab from "./AuditLog.jsx";
 
@@ -562,6 +562,45 @@ export function TabunganTab({ profile, classes, activeClassId, setActiveClassId,
   const [gridMonth, setGridMonth] = useState(todayStr().slice(0, 7)); // "YYYY-MM"
   const [expanded, setExpanded] = useState({}); // { [studentId]: true/false }
 
+  // ---------- Setoran Bendahara ke Wali Kelas ----------
+  const [depPeriodStart, setDepPeriodStart] = useState("");
+  const [depPeriodEnd, setDepPeriodEnd] = useState("");
+  const [depAmount, setDepAmount] = useState("");
+  const [depNote, setDepNote] = useState("");
+  const [deposits, setDeposits] = useState([]);
+
+  const loadDeposits = useCallback(async () => {
+    if (!activeClassId) { setDeposits([]); return; }
+    const { data } = await supabase.from("treasury_deposits").select("*").eq("class_id", activeClassId).order("period_start", { ascending: false });
+    setDeposits(data || []);
+  }, [activeClassId]);
+
+  useEffect(() => { loadDeposits(); }, [loadDeposits]);
+
+  const addDeposit = async () => {
+    if (!activeClassId) return;
+    if (!depPeriodStart || !depPeriodEnd) return notify("Isi tanggal \"dari\" dan \"sampai\" dulu.");
+    if (!depAmount) return notify("Isi jumlah yang diterima dari bendahara.");
+    if (depPeriodStart > depPeriodEnd) return notify("Tanggal \"dari\" tidak boleh setelah tanggal \"sampai\".");
+    const row = { id: genId(), class_id: activeClassId, wali_kelas_id: owner, period_start: depPeriodStart, period_end: depPeriodEnd, amount: Number(depAmount), note: depNote.trim() || null };
+    const { error, offline } = await offlineWrite("treasury_deposits", "insert", row);
+    if (error) return notify("Gagal: " + error.message);
+    setDeposits((d) => [row, ...d]);
+    setDepPeriodStart(""); setDepPeriodEnd(""); setDepAmount(""); setDepNote("");
+    notify(offline ? "Tersimpan offline, akan disinkron otomatis." : "Setoran bendahara tersimpan.");
+  };
+
+  const removeDeposit = async (id) => {
+    setDeposits((d) => d.filter((x) => x.id !== id));
+    await offlineWrite("treasury_deposits", "delete", null, { match: { id } });
+  };
+
+  // Total yang SEHARUSNYA terkumpul dari siswa pada rentang tanggal tertentu
+  // (dihitung dari transaksi "setor" yang sudah dicatat per siswa).
+  const expectedForPeriod = (start, end) => log
+    .filter((l) => l.type === "setor" && l.date >= start && l.date <= end)
+    .reduce((sum, l) => sum + Number(l.amount), 0);
+
   useEffect(() => { setStudentId(students[0]?.id || ""); }, [students]);
 
   const loadLog = useCallback(async () => {
@@ -677,6 +716,56 @@ export function TabunganTab({ profile, classes, activeClassId, setActiveClassId,
           <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Catatan (opsional)" className="text-sm px-3 py-2 rounded-lg flex-1 min-w-[150px]" style={{ background: BG, color: INK }} />
           <button onClick={addEntry} className="px-3.5 py-2 rounded-lg text-sm font-semibold text-white flex items-center gap-1.5" style={{ background: NAVY }}><Plus size={14} /> Simpan</button>
         </div>
+      </Card>
+
+      <Card className="mb-5">
+        <div className="text-sm font-bold mb-1" style={{ color: INK }}>Setoran Bendahara ke Wali Kelas</div>
+        <div className="text-xs mb-3" style={{ color: MUTED }}>
+          Bendahara menagih siswa tiap hari, lalu menyerahkan uangnya ke Anda (biasanya mingguan). Catat setiap kali menerima — sistem otomatis membandingkan dengan total yang seharusnya terkumpul dari siswa pada rentang tanggal itu.
+        </div>
+        <div className="flex flex-wrap gap-2 items-center mb-1">
+          <input type="date" value={depPeriodStart} onChange={(e) => setDepPeriodStart(e.target.value)} className="text-sm px-3 py-2 rounded-lg font-semibold" style={{ background: BG, color: INK }} title="Dari tanggal" placeholder="Dari tanggal" />
+          <span className="text-xs" style={{ color: MUTED }}>s/d</span>
+          <input type="date" value={depPeriodEnd} onChange={(e) => setDepPeriodEnd(e.target.value)} className="text-sm px-3 py-2 rounded-lg font-semibold" style={{ background: BG, color: INK }} title="Sampai tanggal" placeholder="Sampai tanggal" />
+          <input type="number" min={0} value={depAmount} onChange={(e) => setDepAmount(e.target.value)} placeholder="Jumlah diterima (Rp)" className="text-sm px-3 py-2 rounded-lg w-40" style={{ background: BG, color: INK }} />
+          <input value={depNote} onChange={(e) => setDepNote(e.target.value)} placeholder="Catatan (opsional)" className="text-sm px-3 py-2 rounded-lg flex-1 min-w-[150px]" style={{ background: BG, color: INK }} />
+          <button onClick={addDeposit} className="px-3.5 py-2 rounded-lg text-sm font-semibold text-white flex items-center gap-1.5" style={{ background: NAVY }}><Plus size={14} /> Simpan</button>
+        </div>
+
+        {deposits.length === 0 ? (
+          <div className="text-xs py-3" style={{ color: MUTED }}>Belum ada setoran bendahara yang dicatat.</div>
+        ) : (
+          <div className="flex flex-col divide-y mt-2" style={{ borderColor: "#EEF0F3" }}>
+            {deposits.map((d) => {
+              const expected = expectedForPeriod(d.period_start, d.period_end);
+              const selisih = Number(d.amount) - expected;
+              const match = selisih === 0;
+              return (
+                <div key={d.id} className="py-2.5 flex items-center justify-between gap-3 flex-wrap">
+                  <div>
+                    <div className="text-sm font-semibold" style={{ color: INK }}>{d.period_start} s/d {d.period_end}</div>
+                    {d.note && <div className="text-xs" style={{ color: MUTED }}>{d.note}</div>}
+                  </div>
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <div className="text-right">
+                      <div className="text-xs" style={{ color: MUTED }}>Diterima</div>
+                      <div className="text-sm font-bold" style={{ color: NAVY }}>{rupiah(d.amount)}</div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-xs" style={{ color: MUTED }}>Seharusnya (dari siswa)</div>
+                      <div className="text-sm font-semibold" style={{ color: MUTED }}>{rupiah(expected)}</div>
+                    </div>
+                    <span className="text-xs font-bold px-2 py-1 rounded-md flex items-center gap-1" style={{ background: match ? "#EAF7EF" : "#FBEAEC", color: match ? "#2E8B57" : "#C0392B" }}>
+                      {match ? <CheckCircle2 size={13} /> : <AlertTriangle size={13} />}
+                      {match ? "Pas" : selisih > 0 ? `Lebih ${rupiah(selisih)}` : `Kurang ${rupiah(Math.abs(selisih))}`}
+                    </span>
+                    <button onClick={() => removeDeposit(d.id)} className="w-7 h-7 rounded-md flex items-center justify-center" style={{ background: "#FBEAEC" }}><Trash2 size={12} color="#C0392B" /></button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </Card>
 
       <Card className="mb-5" style={{ padding: 0 }}>
