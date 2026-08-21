@@ -662,6 +662,7 @@ function BeepTestMode({ profile, students, notify }) {
 
 // ================= TES BEBAS =================
 function TesBebasMode({ profile, students, notify }) {
+  const draftKey = `r3edu_tes_bebas_draft_${profile.id}`;
   const [presets, setPresets] = useState(() => {
     try { return JSON.parse(localStorage.getItem("r3edu_tes_bebas_presets") || "[]"); } catch { return []; }
   });
@@ -669,12 +670,60 @@ function TesBebasMode({ profile, students, notify }) {
   const [unit, setUnit] = useState("");
   const [worst, setWorst] = useState("");
   const [best, setBest] = useState("");
+  const [draftLoaded, setDraftLoaded] = useState(false);
   const [studentId, setStudentId] = useState("");
   const [raw, setRaw] = useState("");
   const [manualScore, setManualScore] = useState("");
   const [sending, setSending] = useState(false);
+  const [entries, setEntries] = useState([]);
+
+  // Muat tes yang sedang berjalan (nama tes, satuan, dsb) supaya kalau
+  // laptop dimatikan/browser ditutup di tengah jalan, saat dibuka lagi
+  // tetap melanjutkan tes yang sama, bukan dianggap tes baru.
+  useEffect(() => {
+    try {
+      const raw2 = localStorage.getItem(draftKey);
+      if (raw2) {
+        const d = JSON.parse(raw2);
+        setTestName(d.testName || "");
+        setUnit(d.unit || "");
+        setWorst(d.worst ?? "");
+        setBest(d.best ?? "");
+      }
+    } catch { /* abaikan */ }
+    setDraftLoaded(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!draftLoaded) return;
+    try { localStorage.setItem(draftKey, JSON.stringify({ testName, unit, worst, best })); } catch { /* abaikan */ }
+  }, [draftKey, testName, unit, worst, best, draftLoaded]);
 
   useEffect(() => { setStudentId(students[0]?.id || ""); }, [students]);
+
+  // Muat nilai Tes Bebas hari ini (semua nama tes) supaya bisa ditandai
+  // siapa yang sudah/belum diisi, dan supaya kirim ulang tidak bikin data
+  // dobel (jadi update, bukan tambah baris baru).
+  const loadEntries = useCallback(async () => {
+    if (!students.length) { setEntries([]); return; }
+    const { data } = await supabase.from("practice_scores").select("*").eq("guru_id", profile.id).eq("subject", profile.subject)
+      .eq("date", todayStr()).in("student_id", students.map((s) => s.id)).like("note", "Tes Bebas —%");
+    setEntries(data || []);
+  }, [students, profile.id, profile.subject]);
+  useEffect(() => { loadEntries(); }, [loadEntries]);
+
+  const currentTestEntries = entries.filter((e) => (e.note || "").startsWith(`Tes Bebas — ${testName.trim()}:`));
+  const submittedIds = new Set(currentTestEntries.map((e) => e.student_id));
+
+  // Kalau siswa yang dipilih sudah punya nilai untuk tes ini, tampilkan
+  // nilainya (supaya kelihatan "sudah", bukan kosong seperti belum diisi).
+  useEffect(() => {
+    const existing = currentTestEntries.find((e) => e.student_id === studentId);
+    setRaw("");
+    setManualScore(existing ? String(existing.score) : "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [studentId, testName]);
 
   const student = students.find((s) => s.id === studentId);
   const autoScore = customScore(raw, worst, best);
@@ -696,12 +745,21 @@ function TesBebasMode({ profile, students, notify }) {
     setSending(true);
     savePreset();
     const note = `Tes Bebas — ${testName.trim()}: ${raw}${unit ? " " + unit : ""}${manualScore !== "" ? " (nilai diisi manual)" : ` (nilai 0 = ${worst}, nilai 100 = ${best})`}.`;
-    const row = { id: genId(), student_id: studentId, guru_id: profile.id, subject: profile.subject, date: todayStr(), score: Math.max(0, Math.min(100, finalScore)), note };
-    const { error, offline } = await offlineWrite("practice_scores", "insert", row);
+    const scoreVal = Math.max(0, Math.min(100, finalScore));
+    const existing = currentTestEntries.find((e) => e.student_id === studentId);
+    let res;
+    if (existing) {
+      res = await offlineWrite("practice_scores", "update", { score: scoreVal, note }, { match: { id: existing.id } });
+      if (!res.error) setEntries((es) => es.map((e) => (e.id === existing.id ? { ...e, score: scoreVal, note } : e)));
+    } else {
+      const row = { id: genId(), student_id: studentId, guru_id: profile.id, subject: profile.subject, date: todayStr(), score: scoreVal, note };
+      res = await offlineWrite("practice_scores", "insert", row);
+      if (!res.error) setEntries((es) => [row, ...es]);
+    }
     setSending(false);
-    if (error) return notify("Gagal: " + error.message);
+    if (res.error) return notify("Gagal: " + res.error.message);
     setRaw(""); setManualScore("");
-    notify(offline ? "Tersimpan offline, akan disinkron & masuk ke Nilai Harian otomatis." : "Hasil tes sudah masuk ke Nilai Harian.");
+    notify(res.offline ? "Tersimpan offline, akan disinkron & masuk ke Nilai Harian otomatis." : (existing ? "Nilai diperbarui." : "Hasil tes sudah masuk ke Nilai Harian."));
   };
 
   return (
@@ -753,10 +811,14 @@ function TesBebasMode({ profile, students, notify }) {
         <div className="flex flex-col md:flex-row gap-5">
           <Card className="md:w-64 shrink-0" style={{ padding: 0 }}>
             <div className="px-4 pt-4 pb-2 text-sm font-bold" style={{ color: INK }}>Daftar Siswa</div>
+            {testName.trim() && (
+              <div className="px-4 pb-2 text-xs" style={{ color: MUTED }}>{submittedIds.size}/{students.length} sudah diisi hari ini</div>
+            )}
             <div className="flex flex-col divide-y max-h-[70vh] overflow-y-auto" style={{ borderColor: "#EEF0F3" }}>
               {students.map((s) => (
-                <button key={s.id} onClick={() => setStudentId(s.id)} className="w-full text-left px-4 py-2.5 text-sm">
+                <button key={s.id} onClick={() => setStudentId(s.id)} className="w-full text-left px-4 py-2.5 text-sm flex items-center justify-between gap-2">
                   <span style={{ color: INK, fontWeight: studentId === s.id ? 700 : 500 }}>{s.name}</span>
+                  {submittedIds.has(s.id) && <span className="text-xs font-bold shrink-0" style={{ color: GREEN }}>✓ sudah</span>}
                 </button>
               ))}
             </div>
@@ -781,7 +843,7 @@ function TesBebasMode({ profile, students, notify }) {
             <button onClick={send} disabled={!testName.trim() || finalScore == null || sending}
               className="mt-4 px-4 py-2 rounded-lg text-sm font-semibold text-white"
               style={{ background: NAVY, opacity: (!testName.trim() || finalScore == null || sending) ? 0.5 : 1 }}>
-              {sending ? "Mengirim…" : "Kirim ke Nilai Harian"}
+              {sending ? "Mengirim…" : submittedIds.has(studentId) ? "Perbarui Nilai" : "Kirim ke Nilai Harian"}
             </button>
           </Card>
         </div>
@@ -791,11 +853,37 @@ function TesBebasMode({ profile, students, notify }) {
 }
 
 function PraktekTab({ profile, classes, activeClassId, setActiveClassId, students, notify }) {
+  const draftKey = `r3edu_praktek_draft_${profile.id}_${profile.subject}_${activeClassId || "none"}`;
   const [date, setDate] = useState(todayStr());
   const [materi, setMateri] = useState("");
+  const [draftLoaded, setDraftLoaded] = useState(false);
   const [scores, setScores] = useState({});
   const [entries, setEntries] = useState([]);
   const [expandedTugas, setExpandedTugas] = useState({});
+
+  // Muat tugas yang sedang berjalan (tanggal + nama tugas terakhir dipakai
+  // untuk kelas ini) tiap kali kelas berganti — supaya kalau laptop
+  // dimatikan/browser ditutup di tengah jalan, saat dibuka lagi tetap
+  // melanjutkan tugas yang sama, bukan mulai dari kosong lagi.
+  useEffect(() => {
+    setDraftLoaded(false);
+    try {
+      const raw = localStorage.getItem(draftKey);
+      const d = raw ? JSON.parse(raw) : null;
+      setDate(d?.date || todayStr());
+      setMateri(d?.materi || "");
+    } catch {
+      setDate(todayStr());
+      setMateri("");
+    }
+    setDraftLoaded(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftKey]);
+
+  useEffect(() => {
+    if (!draftLoaded) return;
+    try { localStorage.setItem(draftKey, JSON.stringify({ date, materi })); } catch { /* abaikan */ }
+  }, [draftKey, date, materi, draftLoaded]);
 
   const loadEntries = useCallback(async () => {
     if (!students.length) { setEntries([]); return; }
@@ -809,9 +897,22 @@ function PraktekTab({ profile, classes, activeClassId, setActiveClassId, student
   const saveScore = async (studentId) => {
     const val = scores[studentId];
     if (val === undefined || val === "") return;
+    const noteVal = materi.trim() || null;
+    // Kalau siswa ini sudah punya nilai untuk tugas & tanggal yang sama,
+    // PERBARUI nilai itu (bukan bikin baris baru) — supaya rata-rata tidak
+    // dobel dan aman dipakai berkali-kali untuk isi susulan/koreksi.
+    const existing = entries.find((e) => e.student_id === studentId && e.date === date && (e.note || null) === noteVal);
+    if (existing) {
+      const { error, offline } = await offlineWrite("practice_scores", "update", { score: Number(val) }, { match: { id: existing.id } });
+      if (error) return notify("Gagal: " + error.message);
+      setEntries((es) => es.map((e) => (e.id === existing.id ? { ...e, score: Number(val) } : e)));
+      setScores((s) => ({ ...s, [studentId]: "" }));
+      notify(offline ? "Tersimpan offline, akan disinkron otomatis." : "Nilai diperbarui.");
+      return;
+    }
     const row = {
       id: genId(), student_id: studentId, guru_id: profile.id, subject: profile.subject, date, score: Number(val),
-      note: materi.trim() || null,
+      note: noteVal,
     };
     const { error, offline } = await offlineWrite("practice_scores", "insert", row);
     if (error) return notify("Gagal: " + error.message);
@@ -915,6 +1016,17 @@ function PraktekTab({ profile, classes, activeClassId, setActiveClassId, student
                   </button>
                   {isOpen && (
                     <div className="px-5 pb-4">
+                      <button
+                        onClick={() => {
+                          setDate(t.date);
+                          setMateri(t.materi === "(tanpa nama tugas)" ? "" : t.materi);
+                          window.scrollTo({ top: 0, behavior: "smooth" });
+                        }}
+                        className="text-xs font-bold px-3 py-1.5 rounded-md text-white mb-2"
+                        style={{ background: missing.length ? ORANGE : NAVY }}
+                      >
+                        ↑ Lanjutkan Isi Tugas Ini{missing.length > 0 ? ` — Susulan (${missing.length} belum)` : ""}
+                      </button>
                       {missing.length > 0 && (
                         <div className="text-xs mb-2 px-3 py-2 rounded-lg" style={{ background: "#FFF4EE", color: "#9A4A22" }}>
                           Belum mengumpulkan: {missing.map((s) => s.name).join(", ")}
