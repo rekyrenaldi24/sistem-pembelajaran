@@ -582,6 +582,19 @@ export function TabunganTab({ profile, classes, activeClassId, setActiveClassId,
     if (!depPeriodStart || !depPeriodEnd) return notify("Isi tanggal \"dari\" dan \"sampai\" dulu.");
     if (!depAmount) return notify("Isi jumlah yang diterima dari bendahara.");
     if (depPeriodStart > depPeriodEnd) return notify("Tanggal \"dari\" tidak boleh setelah tanggal \"sampai\".");
+    // Kalau rentang tanggalnya bersinggungan dengan periode yang sudah pernah
+    // dicatat (mis. tanggal "sampai" periode lama = tanggal "dari" periode
+    // baru), setoran siswa di hari itu akan ikut terhitung DOBEL di kedua
+    // periode — bikin angka "Seharusnya" jadi lebih besar dari yang benar.
+    const overlap = deposits.find((d) => depPeriodStart <= d.period_end && depPeriodEnd >= d.period_start);
+    if (overlap) {
+      const ok = confirm(
+        `Rentang tanggal ini (${depPeriodStart} s/d ${depPeriodEnd}) bersinggungan dengan periode yang sudah dicatat (${overlap.period_start} s/d ${overlap.period_end}).\n\n` +
+        `Kalau tetap dilanjutkan, setoran siswa di tanggal yang sama akan ikut dihitung dobel di kedua periode, dan angka "Seharusnya" jadi tidak akurat.\n\n` +
+        `Sebaiknya mulai periode baru sehari SETELAH periode sebelumnya berakhir. Lanjutkan tetap simpan?`
+      );
+      if (!ok) return;
+    }
     const row = { id: genId(), class_id: activeClassId, wali_kelas_id: owner, period_start: depPeriodStart, period_end: depPeriodEnd, amount: Number(depAmount), note: depNote.trim() || null };
     const { error, offline } = await offlineWrite("treasury_deposits", "insert", row);
     if (error) return notify("Gagal: " + error.message);
