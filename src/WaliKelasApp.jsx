@@ -582,19 +582,6 @@ export function TabunganTab({ profile, classes, activeClassId, setActiveClassId,
     if (!depPeriodStart || !depPeriodEnd) return notify("Isi tanggal \"dari\" dan \"sampai\" dulu.");
     if (!depAmount) return notify("Isi jumlah yang diterima dari bendahara.");
     if (depPeriodStart > depPeriodEnd) return notify("Tanggal \"dari\" tidak boleh setelah tanggal \"sampai\".");
-    // Kalau rentang tanggalnya bersinggungan dengan periode yang sudah pernah
-    // dicatat (mis. tanggal "sampai" periode lama = tanggal "dari" periode
-    // baru), setoran siswa di hari itu akan ikut terhitung DOBEL di kedua
-    // periode — bikin angka "Seharusnya" jadi lebih besar dari yang benar.
-    const overlap = deposits.find((d) => depPeriodStart <= d.period_end && depPeriodEnd >= d.period_start);
-    if (overlap) {
-      const ok = confirm(
-        `Rentang tanggal ini (${depPeriodStart} s/d ${depPeriodEnd}) bersinggungan dengan periode yang sudah dicatat (${overlap.period_start} s/d ${overlap.period_end}).\n\n` +
-        `Kalau tetap dilanjutkan, setoran siswa di tanggal yang sama akan ikut dihitung dobel di kedua periode, dan angka "Seharusnya" jadi tidak akurat.\n\n` +
-        `Sebaiknya mulai periode baru sehari SETELAH periode sebelumnya berakhir. Lanjutkan tetap simpan?`
-      );
-      if (!ok) return;
-    }
     const row = { id: genId(), class_id: activeClassId, wali_kelas_id: owner, period_start: depPeriodStart, period_end: depPeriodEnd, amount: Number(depAmount), note: depNote.trim() || null };
     const { error, offline } = await offlineWrite("treasury_deposits", "insert", row);
     if (error) return notify("Gagal: " + error.message);
@@ -608,11 +595,10 @@ export function TabunganTab({ profile, classes, activeClassId, setActiveClassId,
     await offlineWrite("treasury_deposits", "delete", null, { match: { id } });
   };
 
-  // Total yang SEHARUSNYA terkumpul dari siswa pada rentang tanggal tertentu
-  // (dihitung dari transaksi "setor" yang sudah dicatat per siswa).
-  const expectedForPeriod = (start, end) => log
-    .filter((l) => l.type === "setor" && l.date >= start && l.date <= end)
-    .reduce((sum, l) => sum + Number(l.amount), 0);
+  // Total yang sudah diserahkan bendahara ke wali kelas, dari SEMUA periode
+  // yang pernah dicatat (bukan per tanggal) — supaya tidak tergantung rentang
+  // tanggal yang dipilih persis pas atau tidak.
+  const totalDisetorBendahara = useMemo(() => deposits.reduce((sum, d) => sum + Number(d.amount), 0), [deposits]);
 
   useEffect(() => { setStudentId(students[0]?.id || ""); }, [students]);
 
@@ -647,6 +633,10 @@ export function TabunganTab({ profile, classes, activeClassId, setActiveClassId,
   const totalKelas = useMemo(() => students.reduce((sum, s) => sum + saldo(s.id), 0), [students, log]);
   const totalSetor = useMemo(() => log.filter((s) => s.type === "setor").reduce((sum, s) => sum + Number(s.amount), 0), [log]);
   const totalTarik = useMemo(() => log.filter((s) => s.type === "tarik").reduce((sum, s) => sum + Number(s.amount), 0), [log]);
+  // Sisa yang seharusnya masih ada di tangan bendahara (belum diserahkan):
+  // Total Tabungan Kelas Terkumpul (dari catatan per siswa) dikurangi total
+  // yang sudah benar-benar diserahkan ke wali kelas sejauh ini.
+  const belumDisetor = totalKelas - totalDisetorBendahara;
 
   const daysInMonth = useMemo(() => {
     const [y, m] = gridMonth.split("-").map(Number);
@@ -734,8 +724,28 @@ export function TabunganTab({ profile, classes, activeClassId, setActiveClassId,
       <Card className="mb-5">
         <div className="text-sm font-bold mb-1" style={{ color: INK }}>Setoran Bendahara ke Wali Kelas</div>
         <div className="text-xs mb-3" style={{ color: MUTED }}>
-          Bendahara menagih siswa tiap hari, lalu menyerahkan uangnya ke Anda (biasanya mingguan). Catat setiap kali menerima — sistem otomatis membandingkan dengan total yang seharusnya terkumpul dari siswa pada rentang tanggal itu.
+          Bendahara menagih siswa tiap hari, lalu menyerahkan uangnya ke Anda (biasanya mingguan). Catat setiap kali menerima — sistem menjumlahkan semuanya dan membandingkan dengan Total Tabungan Kelas Terkumpul, supaya kelihatan berapa yang masih ada di tangan bendahara.
         </div>
+
+        {deposits.length > 0 && (
+          <div className="flex flex-wrap gap-4 mb-4 p-3 rounded-lg" style={{ background: BG }}>
+            <div>
+              <div className="text-xs font-semibold" style={{ color: MUTED }}>Sudah Diserahkan ke Wali Kelas</div>
+              <div className="text-lg font-bold" style={{ color: NAVY }}>{rupiah(totalDisetorBendahara)}</div>
+            </div>
+            <div>
+              <div className="text-xs font-semibold" style={{ color: MUTED }}>Total Tabungan Kelas Terkumpul</div>
+              <div className="text-lg font-bold" style={{ color: MUTED }}>{rupiah(totalKelas)}</div>
+            </div>
+            <div>
+              <div className="text-xs font-semibold" style={{ color: MUTED }}>{belumDisetor > 0 ? "Belum Diserahkan (masih di bendahara)" : belumDisetor < 0 ? "Lebih Diserahkan dari Total Tabungan" : "Status"}</div>
+              <div className="text-lg font-bold" style={{ color: belumDisetor > 0 ? "#9A4A22" : belumDisetor < 0 ? "#C0392B" : GREEN }}>
+                {belumDisetor === 0 ? "Pas, semua sudah diserahkan" : rupiah(Math.abs(belumDisetor))}
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="flex flex-wrap gap-2 items-center mb-1">
           <input type="date" value={depPeriodStart} onChange={(e) => setDepPeriodStart(e.target.value)} className="text-sm px-3 py-2 rounded-lg font-semibold" style={{ background: BG, color: INK }} title="Dari tanggal" placeholder="Dari tanggal" />
           <span className="text-xs" style={{ color: MUTED }}>s/d</span>
@@ -749,34 +759,21 @@ export function TabunganTab({ profile, classes, activeClassId, setActiveClassId,
           <div className="text-xs py-3" style={{ color: MUTED }}>Belum ada setoran bendahara yang dicatat.</div>
         ) : (
           <div className="flex flex-col divide-y mt-2" style={{ borderColor: "#EEF0F3" }}>
-            {deposits.map((d) => {
-              const expected = expectedForPeriod(d.period_start, d.period_end);
-              const selisih = Number(d.amount) - expected;
-              const match = selisih === 0;
-              return (
-                <div key={d.id} className="py-2.5 flex items-center justify-between gap-3 flex-wrap">
-                  <div>
-                    <div className="text-sm font-semibold" style={{ color: INK }}>{d.period_start} s/d {d.period_end}</div>
-                    {d.note && <div className="text-xs" style={{ color: MUTED }}>{d.note}</div>}
-                  </div>
-                  <div className="flex items-center gap-3 flex-wrap">
-                    <div className="text-right">
-                      <div className="text-xs" style={{ color: MUTED }}>Diterima</div>
-                      <div className="text-sm font-bold" style={{ color: NAVY }}>{rupiah(d.amount)}</div>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-xs" style={{ color: MUTED }}>Seharusnya (dari siswa)</div>
-                      <div className="text-sm font-semibold" style={{ color: MUTED }}>{rupiah(expected)}</div>
-                    </div>
-                    <span className="text-xs font-bold px-2 py-1 rounded-md flex items-center gap-1" style={{ background: match ? "#EAF7EF" : "#FBEAEC", color: match ? "#2E8B57" : "#C0392B" }}>
-                      {match ? <CheckCircle2 size={13} /> : <AlertTriangle size={13} />}
-                      {match ? "Pas" : selisih > 0 ? `Lebih ${rupiah(selisih)}` : `Kurang ${rupiah(Math.abs(selisih))}`}
-                    </span>
-                    <button onClick={() => removeDeposit(d.id)} className="w-7 h-7 rounded-md flex items-center justify-center" style={{ background: "#FBEAEC" }}><Trash2 size={12} color="#C0392B" /></button>
-                  </div>
+            {deposits.map((d) => (
+              <div key={d.id} className="py-2.5 flex items-center justify-between gap-3 flex-wrap">
+                <div>
+                  <div className="text-sm font-semibold" style={{ color: INK }}>{d.period_start} s/d {d.period_end}</div>
+                  {d.note && <div className="text-xs" style={{ color: MUTED }}>{d.note}</div>}
                 </div>
-              );
-            })}
+                <div className="flex items-center gap-3 flex-wrap">
+                  <div className="text-right">
+                    <div className="text-xs" style={{ color: MUTED }}>Diterima</div>
+                    <div className="text-sm font-bold" style={{ color: NAVY }}>{rupiah(d.amount)}</div>
+                  </div>
+                  <button onClick={() => removeDeposit(d.id)} className="w-7 h-7 rounded-md flex items-center justify-center" style={{ background: "#FBEAEC" }}><Trash2 size={12} color="#C0392B" /></button>
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </Card>
