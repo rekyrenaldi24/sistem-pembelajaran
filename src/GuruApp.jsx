@@ -932,17 +932,32 @@ function PraktekTab({ profile, classes, activeClassId, setActiveClassId, student
   };
   const studentName = (id) => students.find((s) => s.id === id)?.name || "—";
 
+  // Sebagian tugas (khususnya dari Tes Bebas) menyimpan detail per-siswa
+  // (hasil lari, indikator nilai, dst) di dalam nama tugasnya sendiri —
+  // jadi tiap siswa bisa punya teks yang beda-beda walau sebenarnya masih
+  // 1 tugas yang sama. Supaya tetap terkumpul jadi SATU tugas, kelompokkan
+  // berdasarkan bagian SEBELUM ":" untuk tugas yang berasal dari Tes Bebas.
+  const taskIdentity = (note) => {
+    const n = note || "";
+    if (n.startsWith("Tes Bebas — ")) {
+      const idx = n.indexOf(":");
+      if (idx !== -1) return n.slice(0, idx);
+    }
+    return n;
+  };
+
   // siapa saja yang sudah/belum mengumpulkan untuk sesi tanggal + nama tugas yang sedang diisi
-  const currentTugasEntries = entries.filter((e) => e.date === date && (e.note || "") === materi.trim());
+  const currentTugasEntries = entries.filter((e) => e.date === date && taskIdentity(e.note) === materi.trim());
   const submittedIds = new Set(currentTugasEntries.map((e) => e.student_id));
   const belumForCurrent = students.filter((s) => !submittedIds.has(s.id));
 
-  // kelompokkan riwayat jadi daftar tugas (per tanggal + nama tugas)
+  // kelompokkan riwayat jadi daftar tugas (per tanggal + identitas tugas)
   const tugasList = useMemo(() => {
     const map = new Map();
     entries.forEach((e) => {
-      const key = `${e.date}|${e.note || ""}`;
-      if (!map.has(key)) map.set(key, { date: e.date, materi: e.note || "(tanpa nama tugas)", entries: [] });
+      const identity = taskIdentity(e.note);
+      const key = `${e.date}|${identity}`;
+      if (!map.has(key)) map.set(key, { date: e.date, materi: identity || "(tanpa nama tugas)", entries: [] });
       map.get(key).entries.push(e);
     });
     return Array.from(map.values()).sort((a, b) => (a.date < b.date ? 1 : -1));
@@ -1033,12 +1048,18 @@ function PraktekTab({ profile, classes, activeClassId, setActiveClassId, student
                         </div>
                       )}
                       <div className="flex flex-col gap-1">
-                        {t.entries.map((e) => (
-                          <div key={e.id} className="flex items-center justify-between text-sm py-1">
-                            <span style={{ color: INK }}>{studentName(e.student_id)} — <b>{e.score}</b></span>
-                            <button onClick={() => removeEntry(e.id)} className="w-6 h-6 rounded-md flex items-center justify-center" style={{ background: BG }}><Trash2 size={11} color={MUTED} /></button>
-                          </div>
-                        ))}
+                        {t.entries.map((e) => {
+                          const detail = e.note && e.note.length > t.materi.length ? e.note.slice(t.materi.length).replace(/^:\s*/, "") : "";
+                          return (
+                            <div key={e.id} className="flex items-center justify-between text-sm py-1">
+                              <span style={{ color: INK }}>
+                                {studentName(e.student_id)} — <b>{e.score}</b>
+                                {detail && <span className="text-xs ml-1" style={{ color: MUTED }}>({detail})</span>}
+                              </span>
+                              <button onClick={() => removeEntry(e.id)} className="w-6 h-6 rounded-md flex items-center justify-center" style={{ background: BG }}><Trash2 size={11} color={MUTED} /></button>
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
                   )}
