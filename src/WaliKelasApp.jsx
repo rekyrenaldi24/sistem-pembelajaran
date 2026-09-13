@@ -563,15 +563,14 @@ export function TabunganTab({ profile, classes, activeClassId, setActiveClassId,
   const [expanded, setExpanded] = useState({}); // { [studentId]: true/false }
 
   // ---------- Setoran Bendahara ke Wali Kelas ----------
-  const [depPeriodStart, setDepPeriodStart] = useState("");
-  const [depPeriodEnd, setDepPeriodEnd] = useState("");
+  const [depDate, setDepDate] = useState("");
   const [depAmount, setDepAmount] = useState("");
   const [depNote, setDepNote] = useState("");
   const [deposits, setDeposits] = useState([]);
 
   const loadDeposits = useCallback(async () => {
     if (!activeClassId) { setDeposits([]); return; }
-    const { data } = await supabase.from("treasury_deposits").select("*").eq("class_id", activeClassId).order("period_start", { ascending: false });
+    const { data } = await supabase.from("treasury_deposits").select("*").eq("class_id", activeClassId).order("date", { ascending: false });
     setDeposits(data || []);
   }, [activeClassId]);
 
@@ -579,14 +578,13 @@ export function TabunganTab({ profile, classes, activeClassId, setActiveClassId,
 
   const addDeposit = async () => {
     if (!activeClassId) return;
-    if (!depPeriodStart || !depPeriodEnd) return notify("Isi tanggal \"dari\" dan \"sampai\" dulu.");
+    if (!depDate) return notify("Isi tanggal bendahara menyerahkan uangnya.");
     if (!depAmount) return notify("Isi jumlah yang diterima dari bendahara.");
-    if (depPeriodStart > depPeriodEnd) return notify("Tanggal \"dari\" tidak boleh setelah tanggal \"sampai\".");
-    const row = { id: genId(), class_id: activeClassId, wali_kelas_id: owner, period_start: depPeriodStart, period_end: depPeriodEnd, amount: Number(depAmount), note: depNote.trim() || null };
+    const row = { id: genId(), class_id: activeClassId, wali_kelas_id: owner, date: depDate, amount: Number(depAmount), note: depNote.trim() || null };
     const { error, offline } = await offlineWrite("treasury_deposits", "insert", row);
     if (error) return notify("Gagal: " + error.message);
     setDeposits((d) => [row, ...d]);
-    setDepPeriodStart(""); setDepPeriodEnd(""); setDepAmount(""); setDepNote("");
+    setDepDate(""); setDepAmount(""); setDepNote("");
     notify(offline ? "Tersimpan offline, akan disinkron otomatis." : "Setoran bendahara tersimpan.");
   };
 
@@ -747,9 +745,7 @@ export function TabunganTab({ profile, classes, activeClassId, setActiveClassId,
         )}
 
         <div className="flex flex-wrap gap-2 items-center mb-1">
-          <input type="date" value={depPeriodStart} onChange={(e) => setDepPeriodStart(e.target.value)} className="text-sm px-3 py-2 rounded-lg font-semibold" style={{ background: BG, color: INK }} title="Dari tanggal" placeholder="Dari tanggal" />
-          <span className="text-xs" style={{ color: MUTED }}>s/d</span>
-          <input type="date" value={depPeriodEnd} onChange={(e) => setDepPeriodEnd(e.target.value)} className="text-sm px-3 py-2 rounded-lg font-semibold" style={{ background: BG, color: INK }} title="Sampai tanggal" placeholder="Sampai tanggal" />
+          <input type="date" value={depDate} onChange={(e) => setDepDate(e.target.value)} className="text-sm px-3 py-2 rounded-lg font-semibold" style={{ background: BG, color: INK }} title="Tanggal diserahkan" placeholder="Tanggal diserahkan" />
           <input type="number" min={0} value={depAmount} onChange={(e) => setDepAmount(e.target.value)} placeholder="Jumlah diterima (Rp)" className="text-sm px-3 py-2 rounded-lg w-40" style={{ background: BG, color: INK }} />
           <input value={depNote} onChange={(e) => setDepNote(e.target.value)} placeholder="Catatan (opsional)" className="text-sm px-3 py-2 rounded-lg flex-1 min-w-[150px]" style={{ background: BG, color: INK }} />
           <button onClick={addDeposit} className="px-3.5 py-2 rounded-lg text-sm font-semibold text-white flex items-center gap-1.5" style={{ background: NAVY }}><Plus size={14} /> Simpan</button>
@@ -762,7 +758,7 @@ export function TabunganTab({ profile, classes, activeClassId, setActiveClassId,
             {deposits.map((d) => (
               <div key={d.id} className="py-2.5 flex items-center justify-between gap-3 flex-wrap">
                 <div>
-                  <div className="text-sm font-semibold" style={{ color: INK }}>{d.period_start} s/d {d.period_end}</div>
+                  <div className="text-sm font-semibold" style={{ color: INK }}>{d.date}</div>
                   {d.note && <div className="text-xs" style={{ color: MUTED }}>{d.note}</div>}
                 </div>
                 <div className="flex items-center gap-3 flex-wrap">
