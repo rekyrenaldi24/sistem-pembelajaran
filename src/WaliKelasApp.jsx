@@ -3,7 +3,7 @@ import { supabase, createTempAuthClient } from "./supabaseClient.js";
 import {
   NAVY, NAVY2, ORANGE, BG, INK, MUTED, GREEN, RED, AMBER,
   ATT_STATUSES, todayStr, exportToExcel, downloadStudentTemplate, parseStudentsExcel, sha256Hex,
-  PageHeader, Card, EmptyState, ClassPicker, Toast, OfflineBanner, useOfflineStatus,
+  PageHeader, Card, EmptyState, ClassPicker, Toast, OfflineBanner, useOfflineStatus, fetchAllRows,
 } from "./shared.jsx";
 import { offlineWrite, genId } from "./offlineSync.js";
 import {
@@ -141,8 +141,10 @@ export function AbsensiTab({ profile, classes, activeClassId, setActiveClassId, 
   const loadRecap = useCallback(async () => {
     if (!students.length) { setAllRecords([]); setLoadingRecap(false); return; }
     setLoadingRecap(true);
-    const { data } = await supabase.from("homeroom_attendance").select("student_id,status,date").eq("wali_kelas_id", owner)
-      .in("student_id", students.map((s) => s.id));
+    const { data } = await fetchAllRows(() =>
+      supabase.from("homeroom_attendance").select("student_id,status,date").eq("wali_kelas_id", owner)
+        .in("student_id", students.map((s) => s.id))
+    );
     setAllRecords(data || []);
     setLoadingRecap(false);
   }, [students, owner]);
@@ -602,8 +604,10 @@ export function TabunganTab({ profile, classes, activeClassId, setActiveClassId,
 
   const loadLog = useCallback(async () => {
     if (!students.length) { setLog([]); return; }
-    const { data } = await supabase.from("savings").select("*").eq("wali_kelas_id", owner)
-      .in("student_id", students.map((s) => s.id)).order("date", { ascending: true }).limit(1000);
+    const { data } = await fetchAllRows(() =>
+      supabase.from("savings").select("*").eq("wali_kelas_id", owner)
+        .in("student_id", students.map((s) => s.id)).order("date", { ascending: true }).order("id", { ascending: true })
+    );
     setLog(data || []);
   }, [students, owner]);
 

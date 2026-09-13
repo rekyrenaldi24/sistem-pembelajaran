@@ -4,7 +4,7 @@ import {
   NAVY, NAVY2, ORANGE, BG, INK, MUTED, GREEN, RED,
   ATT_STATUSES, POINT_CATEGORIES, todayStr, gradeLetter,
   computeFinalScore, exportToExcel, downloadStudentTemplate, parseStudentsExcel,
-  PageHeader, Card, EmptyState, ClassPicker, Toast, OfflineBanner, useOfflineStatus,
+  PageHeader, Card, EmptyState, ClassPicker, Toast, OfflineBanner, useOfflineStatus, fetchAllRows,
 } from "./shared.jsx";
 import { offlineWrite, genId } from "./offlineSync.js";
 import {
@@ -1148,10 +1148,10 @@ function NilaiAkhirTab({ profile, classes, activeClassId, setActiveClassId, stud
     setLoading(true);
     const ids = students.map((s) => s.id);
     const [att, prac, exam, pts] = await Promise.all([
-      supabase.from("attendance").select("student_id,status,date").eq("guru_id", profile.id).eq("subject", profile.subject).in("student_id", ids),
-      supabase.from("practice_scores").select("student_id,score").eq("guru_id", profile.id).eq("subject", profile.subject).in("student_id", ids),
+      fetchAllRows(() => supabase.from("attendance").select("student_id,status,date").eq("guru_id", profile.id).eq("subject", profile.subject).in("student_id", ids)),
+      fetchAllRows(() => supabase.from("practice_scores").select("student_id,score").eq("guru_id", profile.id).eq("subject", profile.subject).in("student_id", ids)),
       supabase.from("final_exam_scores").select("student_id,score").eq("guru_id", profile.id).eq("subject", profile.subject).in("student_id", ids),
-      supabase.from("points").select("student_id,type").eq("guru_id", profile.id).in("student_id", ids),
+      fetchAllRows(() => supabase.from("points").select("student_id,type").eq("guru_id", profile.id).in("student_id", ids)),
     ]);
     setAttendance(att.data || []); setPractice(prac.data || []); setPoints(pts.data || []);
     const exMap = {}; (exam.data || []).forEach((r) => { exMap[r.student_id] = r.score; });

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { supabase, createTempAuthClient } from "./supabaseClient.js";
 import {
-  NAVY, NAVY2, ORANGE, BG, INK, MUTED, ATT_STATUSES, todayStr, PageHeader, Card, EmptyState, Toast, exportToExcel,
+  NAVY, NAVY2, ORANGE, BG, INK, MUTED, ATT_STATUSES, todayStr, PageHeader, Card, EmptyState, Toast, exportToExcel, fetchAllRows,
 } from "./shared.jsx";
 import { CalendarCheck, PiggyBank, LogOut, Repeat, ListChecks, Plus, Trash2, FileDown, UserPlus, ArrowUpCircle, Archive } from "lucide-react";
 import { genId } from "./offlineSync.js";
@@ -400,8 +400,10 @@ function RekapTotalAbsensiTab({ classes, jurusanName }) {
       const { data: s } = await supabase.from("students").select("id,name,class_id").in("class_id", classIds).order("name");
       setStudents(s || []);
       if (s && s.length) {
-        const { data: r } = await supabase.from("homeroom_attendance").select("student_id,status,date")
-          .gte("date", startDate).lte("date", endDate).in("student_id", s.map((x) => x.id));
+        const { data: r } = await fetchAllRows(() =>
+          supabase.from("homeroom_attendance").select("student_id,status,date")
+            .gte("date", startDate).lte("date", endDate).in("student_id", s.map((x) => x.id))
+        );
         setRecords(r || []);
       } else setRecords([]);
       setLoading(false);
@@ -514,7 +516,9 @@ function TabunganRekapTab({ classes }) {
       const { data: s } = await supabase.from("students").select("id,name,class_id").in("class_id", classIds).order("name");
       setStudents(s || []);
       if (s && s.length) {
-        const { data: l } = await supabase.from("savings").select("student_id,type,amount").in("student_id", s.map((x) => x.id));
+        const { data: l } = await fetchAllRows(() =>
+          supabase.from("savings").select("student_id,type,amount").in("student_id", s.map((x) => x.id))
+        );
         setLog(l || []);
       } else setLog([]);
       setLoading(false);

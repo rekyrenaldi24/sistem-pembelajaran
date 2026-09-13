@@ -27,6 +27,34 @@ export const POINT_CATEGORIES = {
 
 export const todayStr = () => new Date().toISOString().slice(0, 10);
 
+// Supabase secara default cuma mengembalikan maksimal 1000 baris per
+// request. Untuk rekap yang datanya bisa terus bertambah (absensi,
+// tabungan, nilai, dst.) ini bisa bikin data "hilang" diam-diam kalau
+// jumlah barisnya sudah lewat 1000, tanpa error apapun. Helper ini
+// mengambil SEMUA baris dengan mengulang query per 1000 baris sampai
+// habis. Dipakai untuk query yang mengambil histori/rekap penuh
+// (bukan yang sudah dibatasi tanggal tertentu).
+//
+// Cara pakai: bungkus query Supabase (yang sudah dirangkai .eq/.in/dst,
+// TANPA .range()) dalam fungsi tanpa argumen, supaya bisa dijalankan
+// ulang tiap halaman:
+//   const { data, error } = await fetchAllRows(() =>
+//     supabase.from("homeroom_attendance").select("student_id,status,date").eq("wali_kelas_id", owner)
+//   );
+export async function fetchAllRows(buildQuery, pageSize = 1000) {
+  let from = 0;
+  let all = [];
+  while (true) {
+    const { data, error } = await buildQuery().range(from, from + pageSize - 1);
+    if (error) return { data: null, error };
+    if (!data || data.length === 0) break;
+    all = all.concat(data);
+    if (data.length < pageSize) break;
+    from += pageSize;
+  }
+  return { data: all, error: null };
+}
+
 // Hash SHA-256 (hex) untuk password Biodata Siswa — supaya password tidak
 // tersimpan polos di database, dan hasilnya konsisten dipakai untuk cek login.
 export async function sha256Hex(text) {
