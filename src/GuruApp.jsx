@@ -50,11 +50,13 @@ export default function GuruApp({ profile, onLogout, onSwitchRole }) {
 
   useEffect(() => { loadClasses(); }, []); // eslint-disable-line
 
-  useEffect(() => {
+  const loadStudents = useCallback(async () => {
     if (!activeClassId) { setStudents([]); return; }
-    supabase.from("students").select("*").eq("class_id", activeClassId).order("name")
-      .then(({ data }) => setStudents(data || []));
+    const { data } = await supabase.from("students").select("*").eq("class_id", activeClassId).order("name");
+    setStudents(data || []);
   }, [activeClassId]);
+
+  useEffect(() => { loadStudents(); }, [loadStudents]);
 
   const activeClass = classes.find((c) => c.id === activeClassId);
 
@@ -110,7 +112,7 @@ export default function GuruApp({ profile, onLogout, onSwitchRole }) {
         {tab === "kebugaran" && <TkjiTab profile={profile} classes={classes} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} notify={notify} />}
         {tab === "ujian" && <UjianTab profile={profile} classes={classes} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} notify={notify} />}
         {tab === "akhir" && <NilaiAkhirTab profile={profile} classes={classes} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} activeClass={activeClass} notify={notify} />}
-        {tab === "siswa" && <SiswaTab profile={profile} classes={classes} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} notify={notify} />}
+        {tab === "siswa" && <SiswaTab profile={profile} classes={classes} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} notify={notify} reloadClasses={loadClasses} reloadStudents={loadStudents} />}
         {tab === "riwayat" && <AuditLogTab profile={profile} />}
       </main>
       <Toast message={toast} onClose={() => setToast("")} />
@@ -1348,8 +1350,16 @@ function NilaiAkhirTab({ profile, classes, activeClassId, setActiveClassId, stud
 }
 
 // ================= KELAS & SISWA =================
-function SiswaTab({ profile, classes, activeClassId, setActiveClassId, students, notify }) {
+function SiswaTab({ profile, classes, activeClassId, setActiveClassId, students, notify, reloadClasses, reloadStudents }) {
   const [jurusanList, setJurusanList] = useState([]);
+  const [showAddClass, setShowAddClass] = useState(false);
+  const [newClassName, setNewClassName] = useState("");
+  const [newClassJurusan, setNewClassJurusan] = useState("");
+  const [busyClass, setBusyClass] = useState(false);
+  const [showAddStudent, setShowAddStudent] = useState(false);
+  const [newStudentName, setNewStudentName] = useState("");
+  const [newStudentGender, setNewStudentGender] = useState("");
+  const [busyStudent, setBusyStudent] = useState(false);
 
   useEffect(() => {
     supabase.from("jurusan").select("id, name").order("name").then(({ data }) => setJurusanList(data || []));
@@ -1366,14 +1376,67 @@ function SiswaTab({ profile, classes, activeClassId, setActiveClassId, students,
     return Object.entries(map).sort(([a], [b]) => a.localeCompare(b));
   }, [classes, jurusanList]);
 
+  const addClass = async () => {
+    if (!newClassName.trim()) { notify("Nama kelas wajib diisi."); return; }
+    if (!newClassJurusan) { notify("Pilih jurusan dulu."); return; }
+    setBusyClass(true);
+    const { data, error } = await supabase.from("classes")
+      .insert({ name: newClassName.trim(), jurusan_id: newClassJurusan, archived: false })
+      .select().single();
+    setBusyClass(false);
+    if (error) {
+      notify(error.message.includes("duplicate") ? "Nama kelas ini sudah ada, pakai nama lain." : "Gagal menambah kelas: " + error.message);
+      return;
+    }
+    notify("Kelas baru berhasil ditambahkan.");
+    setNewClassName(""); setNewClassJurusan(""); setShowAddClass(false);
+    await reloadClasses?.();
+    if (data?.id) setActiveClassId(data.id);
+  };
+
+  const addStudent = async () => {
+    if (!activeClassId) { notify("Pilih kelas dulu."); return; }
+    if (!newStudentName.trim()) { notify("Nama siswa wajib diisi."); return; }
+    setBusyStudent(true);
+    const { error } = await supabase.from("students")
+      .insert({ name: newStudentName.trim(), class_id: activeClassId, gender: newStudentGender || null });
+    setBusyStudent(false);
+    if (error) { notify("Gagal menambah siswa: " + error.message); return; }
+    notify("Siswa baru berhasil ditambahkan.");
+    setNewStudentName(""); setNewStudentGender(""); setShowAddStudent(false);
+    await reloadStudents?.();
+  };
+
   return (
     <div>
       <PageHeader eyebrow="Kelas se-Sekolah" title="Pilih Kelas" />
       <Card className="mb-5">
-        <div className="text-sm font-bold mb-1" style={{ color: INK }}>Semua Kelas</div>
-        <div className="text-xs mb-3" style={{ color: MUTED }}>
-          Daftar ini diisi oleh masing-masing wali kelas. Kalau kelas yang Anda cari belum muncul, minta wali kelasnya membuat kelas itu dulu.
+        <div className="flex items-center justify-between mb-1 flex-wrap gap-2">
+          <div className="text-sm font-bold" style={{ color: INK }}>Semua Kelas</div>
+          <button onClick={() => setShowAddClass((v) => !v)}
+            className="flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-lg"
+            style={{ background: showAddClass ? "#F4F5F7" : ORANGE, color: showAddClass ? INK : "white" }}>
+            <Plus size={14} /> {showAddClass ? "Batal" : "Tambah Kelas"}
+          </button>
         </div>
+        <div className="text-xs mb-3" style={{ color: MUTED }}>
+          Daftar ini diisi oleh masing-masing wali kelas. Kalau kelas yang Anda cari belum muncul, Anda bisa menambahkannya sendiri di sini.
+        </div>
+        {showAddClass && (
+          <div className="flex flex-col gap-2 p-3 mb-3 rounded-lg" style={{ background: "#F4F5F7" }}>
+            <select value={newClassJurusan} onChange={(e) => setNewClassJurusan(e.target.value)}
+              className="text-sm px-3 py-2 rounded-lg" style={{ background: "white", color: INK }}>
+              <option value="">Pilih jurusan</option>
+              {jurusanList.map((j) => <option key={j.id} value={j.id}>{j.name}</option>)}
+            </select>
+            <input value={newClassName} onChange={(e) => setNewClassName(e.target.value)} placeholder="Nama kelas, mis. XI DKV 3"
+              className="text-sm px-3 py-2 rounded-lg" style={{ background: "white", color: INK }} />
+            <button onClick={addClass} disabled={busyClass}
+              className="py-2 rounded-lg text-xs font-bold text-white" style={{ background: NAVY2 }}>
+              {busyClass ? "Menyimpan..." : "Simpan Kelas Baru"}
+            </button>
+          </div>
+        )}
         {classes.length === 0 && <div className="text-xs py-2" style={{ color: MUTED }}>Belum ada kelas yang dibuat wali kelas.</div>}
         <div className="flex flex-col gap-4">
           {grouped.map(([jname, list]) => (
@@ -1396,7 +1459,33 @@ function SiswaTab({ profile, classes, activeClassId, setActiveClassId, students,
       <Card>
         <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
           <div className="text-sm font-bold" style={{ color: INK }}>Siswa {classes.find((c) => c.id === activeClassId)?.name ? `— Kelas ${classes.find((c) => c.id === activeClassId).name}` : ""}</div>
+          {activeClassId && (
+            <button onClick={() => setShowAddStudent((v) => !v)}
+              className="flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-lg"
+              style={{ background: showAddStudent ? "#F4F5F7" : ORANGE, color: showAddStudent ? INK : "white" }}>
+              <Plus size={14} /> {showAddStudent ? "Batal" : "Tambah Siswa"}
+            </button>
+          )}
         </div>
+        {showAddStudent && (
+          <div className="flex flex-col gap-2 p-3 mb-3 rounded-lg" style={{ background: "#F4F5F7" }}>
+            <input value={newStudentName} onChange={(e) => setNewStudentName(e.target.value)} placeholder="Nama lengkap siswa"
+              className="text-sm px-3 py-2 rounded-lg" style={{ background: "white", color: INK }} />
+            <div className="flex gap-2">
+              {[["L", "Laki-laki"], ["P", "Perempuan"]].map(([val, label]) => (
+                <button key={val} type="button" onClick={() => setNewStudentGender(val)}
+                  className="flex-1 py-2 rounded-lg text-xs font-bold border"
+                  style={{ background: newStudentGender === val ? ORANGE : "white", color: newStudentGender === val ? "white" : MUTED, borderColor: newStudentGender === val ? ORANGE : "#E7E9EE" }}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            <button onClick={addStudent} disabled={busyStudent}
+              className="py-2 rounded-lg text-xs font-bold text-white" style={{ background: NAVY2 }}>
+              {busyStudent ? "Menyimpan..." : "Simpan Siswa Baru"}
+            </button>
+          </div>
+        )}
         {students.length === 0 ? <EmptyState icon={Users} text="Belum ada siswa di kelas ini." /> : (
           <div className="flex flex-col divide-y" style={{ borderColor: "#EEF0F3" }}>
             {students.map((s, i) => (
