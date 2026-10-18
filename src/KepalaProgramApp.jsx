@@ -1,13 +1,15 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { supabase, createTempAuthClient } from "./supabaseClient.js";
 import {
-  NAVY, NAVY2, ORANGE, BG, INK, MUTED, ATT_STATUSES, todayStr, PageHeader, Card, EmptyState, Toast, exportToExcel, fetchAllRows,
+  NAVY, NAVY2, ORANGE, BG, INK, MUTED, ATT_STATUSES, todayStr, PageHeader, Card, EmptyState, Toast, exportToExcel, fetchAllRows, ClassPicker,
 } from "./shared.jsx";
-import { CalendarCheck, PiggyBank, LogOut, Repeat, ListChecks, Plus, Trash2, FileDown, UserPlus, ArrowUpCircle, Archive } from "lucide-react";
+import { CalendarCheck, PiggyBank, LogOut, Repeat, ListChecks, Plus, Trash2, FileDown, UserPlus, ArrowUpCircle, Archive, Users } from "lucide-react";
+import TambahSiswaPanel from "./TambahSiswaPanel.jsx";
 import { genId } from "./offlineSync.js";
 
 const NAV = [
   { key: "kelola_kelas", label: "Kelola Kelas", icon: ListChecks },
+  { key: "siswa", label: "Tambah Siswa", icon: Users },
   { key: "absensi", label: "Rekap Absensi (Harian)", icon: CalendarCheck },
   { key: "rekap_total", label: "Rekap Total (Excel)", icon: FileDown },
   { key: "tabungan", label: "Rekap Tabungan", icon: PiggyBank },
@@ -299,6 +301,57 @@ function KelolaKelasTab({ profile, classes, notify, reloadClasses }) {
               ))}
             </div>
           )
+        )}
+      </Card>
+    </div>
+  );
+}
+
+// ================= TAMBAH SISWA (kelas aktif di jurusan ini) =================
+function SiswaKaprogTab({ classes, notify }) {
+  const [classId, setClassId] = useState("");
+  const [students, setStudents] = useState([]);
+
+  useEffect(() => {
+    if (!classes.some((c) => c.id === classId)) setClassId(classes[0]?.id || "");
+  }, [classes]); // eslint-disable-line
+
+  const loadStudents = useCallback(async () => {
+    if (!classId) { setStudents([]); return; }
+    const { data } = await supabase.from("students").select("*").eq("class_id", classId).order("name");
+    setStudents(data || []);
+  }, [classId]);
+
+  useEffect(() => { loadStudents(); }, [loadStudents]);
+
+  if (classes.length === 0) {
+    return (
+      <div>
+        <PageHeader eyebrow="Kepala Program" title="Tambah Siswa" />
+        <Card><EmptyState icon={Users} text="Belum ada kelas aktif di jurusan ini. Buat kelas dulu di menu Kelola Kelas." /></Card>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <PageHeader eyebrow="Kepala Program" title="Tambah Siswa" right={<ClassPicker classes={classes} value={classId} onChange={setClassId} />} />
+      <Card>
+        <div className="text-sm font-bold mb-1" style={{ color: INK }}>Siswa — Kelas {classes.find((c) => c.id === classId)?.name}</div>
+        <div className="text-xs mb-3" style={{ color: MUTED }}>
+          Tambahkan siswa satu-satu, atau sekaligus lewat Excel. Mengubah atau menghapus siswa dilakukan oleh wali kelasnya.
+        </div>
+        <TambahSiswaPanel classId={classId} notify={notify} onAdded={loadStudents} />
+        {students.length === 0 ? <EmptyState icon={Users} text="Belum ada siswa di kelas ini." /> : (
+          <div className="flex flex-col divide-y" style={{ borderColor: "#EEF0F3" }}>
+            {students.map((s, i) => (
+              <div key={s.id} className="flex items-center justify-between py-2.5">
+                <span className="text-sm" style={{ color: INK }}><span style={{ color: MUTED, fontWeight: 600 }}>{i + 1}.</span> {s.name}</span>
+                <span className="text-xs font-bold px-2 py-1 rounded-md"
+                  style={{ background: s.gender === "P" ? "#FBEAF2" : "#EAF1FB", color: s.gender === "P" ? "#C23B78" : "#2B5FB8" }}>{s.gender || "?"}</span>
+              </div>
+            ))}
+          </div>
         )}
       </Card>
     </div>
@@ -664,6 +717,7 @@ export default function KepalaProgramApp({ profile, onLogout, onSwitchRole }) {
 
       <main className="flex-1 min-w-0 p-5 md:p-8">
         {tab === "kelola_kelas" && <KelolaKelasTab profile={profile} classes={classes} notify={notify} reloadClasses={reloadClasses} />}
+        {tab === "siswa" && <SiswaKaprogTab classes={activeClasses} notify={notify} />}
         {tab === "absensi" && <AbsensiRekapTab classes={activeClasses} />}
         {tab === "rekap_total" && <RekapTotalAbsensiTab classes={activeClasses} jurusanName={jurusanName} />}
         {tab === "tabungan" && <TabunganRekapTab classes={activeClasses} />}

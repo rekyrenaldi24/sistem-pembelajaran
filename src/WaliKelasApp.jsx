@@ -110,7 +110,7 @@ export default function WaliKelasApp({ profile, onLogout, onSwitchRole }) {
         {tab === "catatan" && <CatatanTab profile={profile} classes={myClasses} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} notify={notify} />}
         {tab === "biodata" && <BiodataTab profile={profile} classes={myClasses} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} notify={notify} />}
         {tab === "tabungan" && <TabunganTab profile={profile} classes={myClasses} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} notify={notify} activeClass={activeClass} />}
-        {tab === "siswa" && <SiswaTab profile={profile} classes={myClasses} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} setStudents={setStudents} notify={notify} />}
+        {tab === "siswa" && <SiswaTab profile={profile} classes={myClasses} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} setStudents={setStudents} notify={notify} reloadClasses={loadClasses} />}
         {tab === "akun_siswa" && <AkunSiswaTab profile={profile} classes={myClasses} activeClassId={activeClassId} setActiveClassId={setActiveClassId} notify={notify} />}
         {tab === "riwayat" && <AuditLogTab profile={profile} />}
       </main>
@@ -1042,9 +1042,51 @@ function AbsenMapelTab({ profile, classes, activeClassId, setActiveClassId, stud
 }
 
 // ================= KELAS & SISWA =================
-function SiswaTab({ profile, classes, activeClassId, setActiveClassId, students, setStudents, notify }) {
+function SiswaTab({ profile, classes, activeClassId, setActiveClassId, students, setStudents, notify, reloadClasses }) {
   const [name, setName] = useState("");
   const [gender, setGender] = useState("L");
+  const [jurusanList, setJurusanList] = useState([]);
+  const [newClassName, setNewClassName] = useState("");
+  const [newClassJurusan, setNewClassJurusan] = useState("");
+  const [creatingClass, setCreatingClass] = useState(false);
+
+  useEffect(() => {
+    supabase.from("jurusan").select("id, name").order("name").then(({ data }) => setJurusanList(data || []));
+  }, []);
+
+  // Wali kelas boleh membuat kelas sendiri (langsung jadi pengampunya),
+  // tapi jurusannya hanya bisa dipilih dari daftar yang sudah ada.
+  const addClass = async () => {
+    const n = newClassName.trim();
+    if (!n) return notify("Nama kelas wajib diisi.");
+    if (!newClassJurusan) return notify("Pilih jurusan dulu.");
+    setCreatingClass(true);
+    const row = { id: genId(), name: n, jurusan_id: newClassJurusan, owner_id: profile.id, wali_kelas_id: profile.id };
+    const { error } = await supabase.from("classes").insert(row);
+    setCreatingClass(false);
+    if (error) return notify(error.message.includes("duplicate") ? "Nama kelas itu sudah dipakai, pakai nama lain." : "Gagal menambah kelas: " + error.message);
+    setNewClassName(""); setNewClassJurusan("");
+    notify("Kelas ditambahkan.");
+    await reloadClasses?.();
+    setActiveClassId(row.id);
+  };
+
+  const addClassCard = (
+    <Card className="mb-5">
+      <div className="text-sm font-bold mb-1" style={{ color: INK }}>Tambah Kelas Baru</div>
+      <div className="text-xs mb-3" style={{ color: MUTED }}>
+        Kelas yang Anda buat langsung menjadi kelas ampuan Anda. Jurusan dipilih dari daftar yang sudah ada.
+      </div>
+      <div className="flex gap-2 flex-wrap">
+        <select value={newClassJurusan} onChange={(e) => setNewClassJurusan(e.target.value)} className="text-sm px-3 py-2 rounded-lg" style={{ background: BG, color: INK }}>
+          <option value="">Pilih jurusan</option>
+          {jurusanList.map((j) => <option key={j.id} value={j.id}>{j.name}</option>)}
+        </select>
+        <input value={newClassName} onChange={(e) => setNewClassName(e.target.value)} placeholder="Nama kelas, mis. XI DKV 3" className="text-sm px-3 py-2 rounded-lg flex-1 min-w-[160px]" style={{ background: BG, color: INK }} onKeyDown={(e) => e.key === "Enter" && addClass()} />
+        <button onClick={addClass} disabled={creatingClass} className="px-3.5 py-2 rounded-lg text-sm font-semibold text-white flex items-center gap-1.5" style={{ background: ORANGE, opacity: creatingClass ? 0.6 : 1 }}><Plus size={14} /> Tambah</button>
+      </div>
+    </Card>
+  );
 
   const addStudent = async () => {
     if (!name.trim() || !activeClassId) return;
@@ -1092,8 +1134,9 @@ function SiswaTab({ profile, classes, activeClassId, setActiveClassId, students,
     return (
       <div>
         <PageHeader eyebrow="Kelas yang Anda Ampu" title="Kelas & Siswa" />
+        {addClassCard}
         <Card>
-          <EmptyState icon={Users} text="Anda belum ditugaskan ke kelas manapun. Hubungi Kepala Program jurusan Anda untuk ditugaskan ke sebuah kelas." />
+          <EmptyState icon={Users} text="Anda belum punya kelas. Buat kelas di atas, atau hubungi Kepala Program jurusan Anda untuk ditugaskan ke sebuah kelas." />
         </Card>
       </div>
     );
@@ -1102,11 +1145,7 @@ function SiswaTab({ profile, classes, activeClassId, setActiveClassId, students,
   return (
     <div>
       <PageHeader eyebrow="Kelas yang Anda Ampu" title="Kelas & Siswa" right={<ClassPicker classes={classes} value={activeClassId} onChange={setActiveClassId} />} />
-      <Card className="mb-5">
-        <div className="text-xs" style={{ color: MUTED }}>
-          Nama &amp; jurusan kelas diatur oleh Kepala Program. Di sini Anda hanya mengelola daftar siswa di kelas yang Anda ampu.
-        </div>
-      </Card>
+      {addClassCard}
       <Card>
         <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
           <div className="text-sm font-bold" style={{ color: INK }}>Siswa</div>

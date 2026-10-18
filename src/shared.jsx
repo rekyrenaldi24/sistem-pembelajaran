@@ -96,11 +96,29 @@ export function exportToExcel(sheets, fileName) {
 }
 
 export function downloadStudentTemplate() {
-  const rows = [
-    { Nama: "Contoh: Budi Santoso", "Jenis Kelamin (L/P)": "L" },
-    { Nama: "Contoh: Siti Aminah", "Jenis Kelamin (L/P)": "P" },
+  // Sheet 1 = tempat mengisi data (inilah yang dibaca saat upload).
+  // Sheet 2 = petunjuk singkat, tidak ikut dibaca.
+  const data = [
+    ["Nama", "Jenis Kelamin (L/P)"],
+    ["Contoh: Budi Santoso", "L"],
+    ["Contoh: Siti Aminah", "P"],
   ];
-  exportToExcel([{ name: "Template Siswa", rows }], "Template_Daftar_Siswa.xlsx");
+  const ws = XLSX.utils.aoa_to_sheet(data);
+  ws["!cols"] = [{ wch: 40 }, { wch: 22 }];
+  const guide = [
+    ["PETUNJUK PENGISIAN"],
+    ["1. Isi nama siswa di kolom A (Nama), satu siswa per baris, mulai dari baris ke-4 (hapus 2 baris contoh kalau mau)."],
+    ["2. Kolom B (Jenis Kelamin) isi L untuk laki-laki atau P untuk perempuan. Boleh dikosongkan, nanti bisa diisi manual."],
+    ["3. Jangan ubah judul kolom di baris pertama dan jangan pindahkan sheet \"Daftar Siswa\" dari urutan pertama."],
+    ["4. Baris yang namanya diawali kata \"Contoh\" otomatis diabaikan."],
+    ["5. Simpan file sebagai .xlsx, lalu upload di menu siswa. Nama yang sudah ada di kelas yang sama tidak akan dobel."],
+  ];
+  const wsGuide = XLSX.utils.aoa_to_sheet(guide);
+  wsGuide["!cols"] = [{ wch: 110 }];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Daftar Siswa");
+  XLSX.utils.book_append_sheet(wb, wsGuide, "Petunjuk");
+  XLSX.writeFile(wb, "Template_Daftar_Siswa.xlsx");
 }
 
 // Membaca file .xlsx yang diupload, mengembalikan [{ name, gender }]
