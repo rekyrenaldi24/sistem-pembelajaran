@@ -2,13 +2,13 @@ import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { supabase } from "./supabaseClient.js";
 import {
   NAVY, NAVY2, ORANGE, BG, INK, MUTED, GREEN, RED, AMBER, todayStr,
-  PageHeader, Card, EmptyState, Toast, fetchAllRows,
+  PageHeader, Card, EmptyState, Toast, fetchAllRows, ClassPicker, TingkatFilter, classTingkatKey,
 } from "./shared.jsx";
 import TambahSiswaPanel from "./TambahSiswaPanel.jsx";
 import { AbsensiRekapTab, TabunganRekapTab } from "./KepalaProgramApp.jsx";
 import { describeDetail, TABLE_LABELS, ACTION_LABEL, ACTION_ICON, ACTION_COLOR } from "./AuditLog.jsx";
 import {
-  LayoutDashboard, UserCheck, ListChecks, Users, CalendarCheck, PiggyBank, History, LogOut, Repeat, Plus,
+  LayoutDashboard, UserCheck, ListChecks, Users, CalendarCheck, PiggyBank, History, LogOut, Repeat, Plus, Pencil, Trash2,
 } from "lucide-react";
 
 const NAV = [
@@ -44,6 +44,7 @@ const roleBadges = (p) => [
 // ================= PANTAU HARI INI =================
 function RingkasanTab({ jurusan, classes }) {
   const [data, setData] = useState(null);
+  const [tk, setTk] = useState("all");
 
   useEffect(() => {
     (async () => {
@@ -105,8 +106,9 @@ function RingkasanTab({ jurusan, classes }) {
           </Card>
         ))}
       </div>
+      <TingkatFilter classes={active} value={tk} onChange={setTk} />
       <div className="flex flex-col gap-4">
-        {groupByJurusan(active, jurusan).map(([jname, list]) => (
+        {groupByJurusan(active.filter((c) => tk === "all" || classTingkatKey(c) === tk), jurusan).map(([jname, list]) => (
           <Card key={jname}>
             <div className="text-xs font-bold uppercase tracking-wide mb-2" style={{ color: ORANGE }}>{jname}</div>
             <div className="flex flex-col divide-y" style={{ borderColor: "#EEF0F3" }}>
@@ -227,6 +229,44 @@ function JurusanKelasTab({ jurusan, classes, notify, reload }) {
   const [newClassName, setNewClassName] = useState("");
   const [newClassJurusan, setNewClassJurusan] = useState("");
   const [busy, setBusy] = useState(false);
+  const [tk, setTk] = useState("all");
+  const [editingId, setEditingId] = useState(null);
+  const [editName, setEditName] = useState("");
+  const [savingEdit, setSavingEdit] = useState(false);
+
+  const saveRename = async (c) => {
+    const nm = editName.trim();
+    if (!nm) return notify("Nama kelas wajib diisi.");
+    if (nm === c.name) { setEditingId(null); return; }
+    setSavingEdit(true);
+    const { data, error } = await supabase.from("classes").update({ name: nm }).eq("id", c.id).select("id");
+    setSavingEdit(false);
+    if (error) return notify(error.message.includes("duplicate") ? "Nama kelas itu sudah dipakai, pakai nama lain." : "Gagal mengubah nama: " + error.message);
+    if (!data || data.length === 0) return notify("Nama tidak berubah. Pastikan file SQL admin terbaru sudah dijalankan di Supabase.");
+    setEditingId(null);
+    notify(`Nama kelas diubah menjadi "${nm}".`);
+    reload();
+  };
+
+  // Hapus kelas = ikut menghapus semua siswa & datanya, jadi dijaga
+  // dengan konfirmasi: harus mengetik nama kelas persis.
+  const deleteClass = async (c) => {
+    const { count } = await supabase.from("students").select("id", { count: "exact", head: true }).eq("class_id", c.id);
+    const typed = window.prompt(
+      `HAPUS PERMANEN kelas "${c.name}"?\n\nKelas ini berisi ${count ?? "?"} siswa. Semua siswa beserta absensi, tabungan, nilai, dan catatannya ikut terhapus dan TIDAK BISA dikembalikan.\n\nKalau kelasnya hanya sudah lulus atau tidak dipakai lagi, sebaiknya jangan dihapus (arsipkan lewat menu Kepala Program).\n\nUntuk melanjutkan, ketik nama kelas persis seperti ini:\n${c.name}`
+    );
+    if (typed === null) return;
+    if (typed.trim() !== c.name) return notify("Nama yang diketik tidak sama, penghapusan dibatalkan.");
+    const { data, error } = await supabase.from("classes").delete().eq("id", c.id).select("id");
+    if (error) {
+      return notify(error.code === "23503"
+        ? "Kelas ini tidak bisa dihapus karena masih terhubung ke akun sekretaris kelas atau riwayat naik tahun ajaran. Hapus dulu akun sekretarisnya, atau biarkan kelasnya."
+        : "Gagal menghapus: " + error.message);
+    }
+    if (!data || data.length === 0) return notify("Kelas tidak terhapus. Pastikan file SQL admin terbaru sudah dijalankan di Supabase.");
+    notify(`Kelas "${c.name}" dihapus.`);
+    reload();
+  };
 
   const addJurusan = async () => {
     const n = newJurusan.trim();
@@ -254,7 +294,7 @@ function JurusanKelasTab({ jurusan, classes, notify, reload }) {
   };
 
   const input = "text-sm px-3 py-2 rounded-lg";
-  const grouped = groupByJurusan(classes, jurusan);
+  const grouped = groupByJurusan(classes.filter((c) => tk === "all" || classTingkatKey(c) === tk), jurusan);
   const emptyJurusan = jurusan.filter((j) => !classes.some((c) => c.jurusan_id === j.id));
 
   return (
@@ -281,15 +321,35 @@ function JurusanKelasTab({ jurusan, classes, notify, reload }) {
           Kelas baru belum punya wali kelas. Wali kelasnya bisa ditugaskan oleh Kepala Program jurusan itu.
         </div>
       </Card>
+      <TingkatFilter classes={classes} value={tk} onChange={setTk} />
       <div className="flex flex-col gap-4">
+        {grouped.length === 0 && <div className="text-xs" style={{ color: MUTED }}>Belum ada kelas di tingkat ini.</div>}
         {grouped.map(([jname, list]) => (
           <Card key={jname}>
             <div className="text-xs font-bold uppercase tracking-wide mb-1.5" style={{ color: ORANGE }}>{jname} · {list.length} kelas</div>
             <div className="flex flex-col divide-y" style={{ borderColor: "#EEF0F3" }}>
               {list.map((c) => (
-                <div key={c.id} className="py-2 flex items-center justify-between">
-                  <span className="text-sm font-medium" style={{ color: INK }}>{c.name}</span>
-                  {c.archived && <span className="text-xs font-semibold px-2 py-0.5 rounded-md" style={{ background: BG, color: MUTED }}>Arsip</span>}
+                <div key={c.id} className="py-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-sm font-medium" style={{ color: INK }}>{c.name}</span>
+                    <div className="flex items-center gap-2">
+                      {c.archived && <span className="text-xs font-semibold px-2 py-0.5 rounded-md" style={{ background: BG, color: MUTED }}>Arsip</span>}
+                      <button onClick={() => { setEditingId(c.id); setEditName(c.name); }} title="Ubah nama kelas" className="w-8 h-8 rounded-md flex items-center justify-center" style={{ background: "#EEF0F3" }}><Pencil size={13} color={MUTED} /></button>
+                      <button onClick={() => deleteClass(c)} title="Hapus permanen" className="w-8 h-8 rounded-md flex items-center justify-center" style={{ background: "#FBEAEC" }}><Trash2 size={13} color="#C0392B" /></button>
+                    </div>
+                  </div>
+                  {editingId === c.id && (
+                    <div className="mt-2 p-3 rounded-lg flex flex-col gap-2" style={{ background: BG }}>
+                      <div className="text-xs" style={{ color: MUTED }}>
+                        Hanya nama yang berganti, siswa dan datanya tetap utuh. Awali dengan tingkat, mis. "X DKV 1", "XI DKV 1", "XII DKV 1", supaya masuk ke pilihan tingkat yang benar.
+                      </div>
+                      <div className="flex gap-2 flex-wrap">
+                        <input value={editName} onChange={(e) => setEditName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && saveRename(c)} className="text-sm px-3 py-2 rounded-lg flex-1 min-w-[180px]" style={{ background: "white", color: INK }} />
+                        <button onClick={() => saveRename(c)} disabled={savingEdit} className="px-3.5 py-2 rounded-lg text-sm font-semibold text-white" style={{ background: NAVY, opacity: savingEdit ? 0.6 : 1 }}>{savingEdit ? "Menyimpan…" : "Simpan Nama"}</button>
+                        <button onClick={() => setEditingId(null)} className="px-3.5 py-2 rounded-lg text-sm font-semibold" style={{ background: "white", color: MUTED }}>Batal</button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -306,12 +366,11 @@ function JurusanKelasTab({ jurusan, classes, notify, reload }) {
 // ================= TAMBAH SISWA (kelas manapun) =================
 function SiswaAdminTab({ jurusan, classes, notify }) {
   const active = useMemo(() => classes.filter((c) => !c.archived), [classes]);
-  const grouped = useMemo(() => groupByJurusan(active, jurusan), [active, jurusan]);
   const [classId, setClassId] = useState("");
   const [students, setStudents] = useState([]);
 
   useEffect(() => {
-    if (!active.some((c) => c.id === classId)) setClassId(grouped[0]?.[1]?.[0]?.id || "");
+    if (!active.some((c) => c.id === classId)) setClassId(active[0]?.id || "");
   }, [active]); // eslint-disable-line
 
   const loadStudents = useCallback(async () => {
@@ -332,16 +391,7 @@ function SiswaAdminTab({ jurusan, classes, notify }) {
 
   return (
     <div>
-      <PageHeader eyebrow="Admin" title="Tambah Siswa" right={
-        <select value={classId} onChange={(e) => setClassId(e.target.value)}
-          className="text-sm font-semibold px-4 py-2.5 rounded-lg border-0 cursor-pointer" style={{ background: "white", color: INK, boxShadow: "0 1px 2px rgba(22,35,63,0.12)" }}>
-          {grouped.map(([jname, list]) => (
-            <optgroup key={jname} label={jname}>
-              {list.map((c) => <option key={c.id} value={c.id}>Kelas {c.name}</option>)}
-            </optgroup>
-          ))}
-        </select>
-      } />
+      <PageHeader eyebrow="Admin" title="Tambah Siswa" right={<ClassPicker classes={active} value={classId} onChange={setClassId} />} />
       <Card>
         <div className="text-sm font-bold mb-1" style={{ color: INK }}>Siswa — Kelas {active.find((c) => c.id === classId)?.name}</div>
         <div className="text-xs mb-3" style={{ color: MUTED }}>

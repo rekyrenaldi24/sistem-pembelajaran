@@ -184,18 +184,81 @@ export function EmptyState({ icon: Icon, text }) {
   );
 }
 
+// Menebak tingkat (10/11/12) dari nama kelas: "X DKV 1" / "10 DKV 1" -> 10,
+// "XI ..." / "11 ..." -> 11, "XII ..." / "12 ..." -> 12. Kalau nama kelas tidak
+// diawali tingkat (mis. "dkv 1"), hasilnya null dan masuk kelompok "Lainnya"
+// — cukup ubah nama kelasnya (menu Kelola Kelas) supaya masuk tingkat yang benar.
+export function tingkatOf(name) {
+  const m = String(name || "").trim().toUpperCase().match(/^(?:(XII|XI|X)(?![A-Z])|(12|11|10)(?![0-9]))/);
+  if (!m) return null;
+  const t = m[1] || m[2];
+  if (t === "X" || t === "10") return 10;
+  if (t === "XI" || t === "11") return 11;
+  return 12;
+}
+export function classTingkatKey(c) {
+  const t = tingkatOf(c?.name);
+  return t === null ? "lain" : String(t);
+}
+const tingkatLabel = (k) => (k === "lain" ? "Lainnya" : `Kelas ${k}`);
+
+// Pemilih kelas dua langkah: pilih tingkat (10/11/12) dulu, baru kelasnya
+// muncul sesuai tingkat itu.
 export function ClassPicker({ classes, value, onChange }) {
+  const cur = classes.find((c) => c.id === value);
+  const keys = ["10", "11", "12", ...(classes.some((c) => classTingkatKey(c) === "lain") ? ["lain"] : [])];
+  const selKey = cur ? classTingkatKey(cur) : (keys.find((k) => classes.some((c) => classTingkatKey(c) === k)) || "10");
+  const inTingkat = classes.filter((c) => classTingkatKey(c) === selKey);
+  const selectCls = "text-sm font-semibold px-4 py-2.5 rounded-lg border-0 cursor-pointer";
+  const selectStyle = { background: "white", color: INK, boxShadow: "0 1px 2px rgba(22,35,63,0.12)" };
   return (
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      className="text-sm font-semibold px-4 py-2.5 rounded-lg border-0 cursor-pointer"
-      style={{ background: "white", color: INK, boxShadow: "0 1px 2px rgba(22,35,63,0.12)" }}
-    >
-      {classes.map((c) => (
-        <option key={c.id} value={c.id}>Kelas {c.name}</option>
-      ))}
-    </select>
+    <div className="flex items-center gap-2 flex-wrap">
+      <select
+        value={selKey}
+        onChange={(e) => {
+          const first = classes.find((c) => classTingkatKey(c) === e.target.value);
+          if (first) onChange(first.id);
+        }}
+        className={selectCls}
+        style={selectStyle}
+        title="Tingkat"
+      >
+        {keys.map((k) => {
+          const n = classes.filter((c) => classTingkatKey(c) === k).length;
+          return <option key={k} value={k} disabled={n === 0}>{tingkatLabel(k)}{n === 0 ? " (kosong)" : ""}</option>;
+        })}
+      </select>
+      <select value={cur ? value : ""} onChange={(e) => onChange(e.target.value)} className={selectCls} style={selectStyle} title="Kelas">
+        {!cur && <option value="">Pilih kelas</option>}
+        {inTingkat.map((c) => (
+          <option key={c.id} value={c.id}>Kelas {c.name}</option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+// Tombol filter tingkat untuk daftar kelas (Semua / Kelas 10 / 11 / 12).
+// value: "all" | "10" | "11" | "12" | "lain"
+export function TingkatFilter({ classes, value, onChange, showAll = true }) {
+  const keys = ["10", "11", "12", ...(classes.some((c) => classTingkatKey(c) === "lain") ? ["lain"] : [])];
+  const items = [
+    ...(showAll ? [{ k: "all", label: "Semua", n: classes.length }] : []),
+    ...keys.map((k) => ({ k, label: tingkatLabel(k), n: classes.filter((c) => classTingkatKey(c) === k).length })),
+  ];
+  return (
+    <div className="flex flex-wrap gap-2 mb-3">
+      {items.map((it) => {
+        const on = value === it.k;
+        return (
+          <button key={it.k} type="button" onClick={() => onChange(it.k)}
+            className="px-3 py-1.5 rounded-full text-xs font-bold"
+            style={{ background: on ? NAVY : "white", color: on ? "white" : MUTED, border: "1px solid #E7E9EE", opacity: it.n === 0 && !on ? 0.55 : 1 }}>
+            {it.label} · {it.n}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 

@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { supabase, createTempAuthClient } from "./supabaseClient.js";
 import {
-  NAVY, NAVY2, ORANGE, BG, INK, MUTED, ATT_STATUSES, todayStr, PageHeader, Card, EmptyState, Toast, exportToExcel, fetchAllRows, ClassPicker,
+  NAVY, NAVY2, ORANGE, BG, INK, MUTED, ATT_STATUSES, todayStr, PageHeader, Card, EmptyState, Toast, exportToExcel, fetchAllRows, ClassPicker, TingkatFilter, classTingkatKey,
 } from "./shared.jsx";
-import { CalendarCheck, PiggyBank, LogOut, Repeat, ListChecks, Plus, Trash2, FileDown, UserPlus, ArrowUpCircle, Archive, Users } from "lucide-react";
+import { CalendarCheck, PiggyBank, LogOut, Repeat, ListChecks, Plus, Trash2, FileDown, UserPlus, ArrowUpCircle, Archive, Users, Pencil } from "lucide-react";
 import TambahSiswaPanel from "./TambahSiswaPanel.jsx";
 import { genId } from "./offlineSync.js";
 
@@ -39,8 +39,13 @@ function KelolaKelasTab({ profile, classes, notify, reloadClasses }) {
   const [newYearLabel, setNewYearLabel] = useState("");
   const [promoting, setPromoting] = useState(false);
   const [showArchive, setShowArchive] = useState(false);
+  const [tk, setTk] = useState("all");
+  const [editingId, setEditingId] = useState(null);
+  const [editName, setEditName] = useState("");
+  const [savingEdit, setSavingEdit] = useState(false);
 
   const activeClasses = classes.filter((c) => !c.archived);
+  const shownClasses = activeClasses.filter((c) => tk === "all" || classTingkatKey(c) === tk);
   const archivedClasses = classes.filter((c) => c.archived);
   const classNameById = Object.fromEntries(classes.map((c) => [c.id, c.name]));
 
@@ -71,10 +76,37 @@ function KelolaKelasTab({ profile, classes, notify, reloadClasses }) {
     reloadClasses();
   };
 
+  // ---------- Ubah nama kelas ----------
+  const openEdit = (c) => {
+    setEditingId(c.id);
+    setEditName(c.name);
+    setAssigningId(null);
+    setPromotingId(null);
+  };
+
+  const saveEdit = async (c) => {
+    const nm = editName.trim();
+    if (!nm) return notify("Nama kelas wajib diisi.");
+    if (nm === c.name) { setEditingId(null); return; }
+    setSavingEdit(true);
+    const { data, error } = await supabase.from("classes").update({ name: nm }).eq("id", c.id).select("id");
+    setSavingEdit(false);
+    if (error) return notify(error.message.includes("duplicate") ? "Nama kelas itu sudah dipakai, pakai nama lain." : "Gagal mengubah nama: " + error.message);
+    if (!data || data.length === 0) return notify("Nama tidak berubah — Anda tidak punya izin untuk kelas ini.");
+    setEditingId(null);
+    notify(`Nama kelas diubah menjadi "${nm}".`);
+    reloadClasses();
+  };
+
   const deleteClass = async (c) => {
     if (!confirm(`Hapus PERMANEN kelas "${c.name}"? Semua data siswa, absensi, dan nilai di kelas ini akan ikut terhapus permanen dan TIDAK BISA dikembalikan. Kalau kelas ini sudah lulus / sudah tidak dipakai lagi tapi datanya masih mau disimpan, pakai tombol "Arsipkan" saja, jangan Hapus.`)) return;
-    const { error } = await supabase.from("classes").delete().eq("id", c.id);
-    if (error) return notify("Gagal: " + error.message);
+    const { data, error } = await supabase.from("classes").delete().eq("id", c.id).select("id");
+    if (error) {
+      return notify(error.code === "23503"
+        ? "Kelas ini tidak bisa dihapus karena masih terhubung ke akun sekretaris kelas atau riwayat naik tahun ajaran. Arsipkan saja."
+        : "Gagal: " + error.message);
+    }
+    if (!data || data.length === 0) return notify("Kelas tidak terhapus — Anda tidak punya izin untuk kelas ini.");
     notify("Kelas dihapus.");
     reloadClasses();
   };
@@ -179,11 +211,14 @@ function KelolaKelasTab({ profile, classes, notify, reloadClasses }) {
           Akun Wali Kelas dibuat &amp; ditugaskan dari sini — wali kelas tidak bisa bikin akun sendiri. Catat email &amp; password yang Anda buat, lalu berikan ke wali kelasnya.
           Kalau tahun ajaran baru dimulai, pakai tombol <b>Naik Tahun Ajaran</b> di tiap kelas (siswa, biodata &amp; saldo tabungan otomatis dibawa; absensi/nilai/catatan mulai baru).
         </div>
+        {activeClasses.length > 0 && <TingkatFilter classes={activeClasses} value={tk} onChange={setTk} />}
         {activeClasses.length === 0 ? (
           <EmptyState icon={ListChecks} text="Belum ada kelas aktif di jurusan ini." />
+        ) : shownClasses.length === 0 ? (
+          <div className="text-xs py-2" style={{ color: MUTED }}>Belum ada kelas di tingkat ini.</div>
         ) : (
           <div className="flex flex-col divide-y" style={{ borderColor: "#EEF0F3" }}>
-            {activeClasses.map((c) => (
+            {shownClasses.map((c) => (
               <div key={c.id} className="py-2.5">
                 <div className="flex items-center justify-between gap-2 flex-wrap">
                   <span className="text-sm font-medium" style={{ color: INK }}>{c.name}</span>
@@ -201,10 +236,25 @@ function KelolaKelasTab({ profile, classes, notify, reloadClasses }) {
                     <button onClick={() => openPromote(c)} className="text-xs font-bold px-2.5 py-1.5 rounded-md text-white flex items-center gap-1" style={{ background: NAVY }}>
                       <ArrowUpCircle size={13} /> Naik Tahun Ajaran
                     </button>
+                    <button onClick={() => openEdit(c)} title="Ubah nama kelas" className="w-8 h-8 rounded-md flex items-center justify-center" style={{ background: "#EEF0F3" }}><Pencil size={13} color={MUTED} /></button>
                     <button onClick={() => archiveClass(c)} title="Arsipkan (mis. kelas lulus)" className="w-8 h-8 rounded-md flex items-center justify-center" style={{ background: "#EEF0F3" }}><Archive size={13} color={MUTED} /></button>
                     <button onClick={() => deleteClass(c)} title="Hapus permanen" className="w-8 h-8 rounded-md flex items-center justify-center" style={{ background: "#FBEAEC" }}><Trash2 size={13} color="#C0392B" /></button>
                   </div>
                 </div>
+                {editingId === c.id && (
+                  <div className="mt-2.5 p-3 rounded-lg flex flex-col gap-2" style={{ background: BG }}>
+                    <div className="text-xs font-semibold" style={{ color: MUTED }}>
+                      Ubah nama kelas "{c.name}". Siswa dan seluruh datanya tetap utuh, hanya namanya yang berganti. Awali dengan tingkat, mis. "X DKV 1", "XI DKV 1", atau "XII DKV 1", supaya muncul di pilihan tingkat yang benar.
+                    </div>
+                    <div className="flex gap-2 flex-wrap">
+                      <input value={editName} onChange={(e) => setEditName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && saveEdit(c)} className="text-sm px-3 py-2 rounded-lg flex-1 min-w-[180px]" style={{ background: "white", color: INK }} />
+                      <button onClick={() => saveEdit(c)} disabled={savingEdit} className="px-3.5 py-2 rounded-lg text-sm font-semibold text-white" style={{ background: NAVY, opacity: savingEdit ? 0.6 : 1 }}>
+                        {savingEdit ? "Menyimpan…" : "Simpan Nama"}
+                      </button>
+                      <button onClick={() => setEditingId(null)} className="px-3.5 py-2 rounded-lg text-sm font-semibold" style={{ background: "white", color: MUTED }}>Batal</button>
+                    </div>
+                  </div>
+                )}
                 {promotingId === c.id && (
                   <div className="mt-2.5 p-3 rounded-lg flex flex-col gap-2" style={{ background: BG }}>
                     <div className="text-xs font-semibold" style={{ color: MUTED }}>

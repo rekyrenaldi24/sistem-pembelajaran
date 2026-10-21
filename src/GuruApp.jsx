@@ -4,7 +4,7 @@ import {
   NAVY, NAVY2, ORANGE, BG, INK, MUTED, GREEN, RED,
   ATT_STATUSES, POINT_CATEGORIES, todayStr, gradeLetter,
   computeFinalScore, exportToExcel, downloadStudentTemplate, parseStudentsExcel,
-  PageHeader, Card, EmptyState, ClassPicker, Toast, OfflineBanner, useOfflineStatus, fetchAllRows,
+  PageHeader, Card, EmptyState, ClassPicker, Toast, OfflineBanner, useOfflineStatus, fetchAllRows, TingkatFilter, classTingkatKey,
 } from "./shared.jsx";
 import { offlineWrite, genId } from "./offlineSync.js";
 import {
@@ -1358,16 +1358,22 @@ function SiswaTab({ profile, classes, activeClassId, setActiveClassId, students,
     supabase.from("jurusan").select("id, name").order("name").then(({ data }) => setJurusanList(data || []));
   }, []);
 
+  // Pilih tingkat dulu (10/11/12); daftar kelas di bawahnya menyesuaikan.
+  const [tkSel, setTkSel] = useState(null);
+  const activeCls = classes.find((c) => c.id === activeClassId);
+  const tk = tkSel ?? (activeCls ? classTingkatKey(activeCls) : "10");
+  const shownClasses = useMemo(() => classes.filter((c) => classTingkatKey(c) === tk), [classes, tk]);
+
   const jurusanName = (id) => jurusanList.find((j) => j.id === id)?.name;
   const grouped = useMemo(() => {
     const map = {};
-    classes.forEach((c) => {
+    shownClasses.forEach((c) => {
       const key = jurusanName(c.jurusan_id) || "Belum ada jurusan";
       if (!map[key]) map[key] = [];
       map[key].push(c);
     });
     return Object.entries(map).sort(([a], [b]) => a.localeCompare(b));
-  }, [classes, jurusanList]);
+  }, [shownClasses, jurusanList]);
 
   const activeName = classes.find((c) => c.id === activeClassId)?.name;
 
@@ -1380,6 +1386,8 @@ function SiswaTab({ profile, classes, activeClassId, setActiveClassId, students,
           Kelas dibuat oleh Kepala Program atau Wali Kelas. Kalau kelas yang Anda cari belum muncul, minta mereka membuatnya dulu.
         </div>
         {classes.length === 0 && <div className="text-xs py-2" style={{ color: MUTED }}>Belum ada kelas yang dibuat.</div>}
+        {classes.length > 0 && <TingkatFilter classes={classes} value={tk} onChange={setTkSel} showAll={false} />}
+        {classes.length > 0 && shownClasses.length === 0 && <div className="text-xs py-2" style={{ color: MUTED }}>Belum ada kelas di tingkat ini.</div>}
         <div className="flex flex-col gap-4">
           {grouped.map(([jname, list]) => (
             <div key={jname}>
