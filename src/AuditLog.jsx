@@ -3,24 +3,25 @@ import { supabase } from "./supabaseClient.js";
 import { INK, MUTED, GREEN, RED, PageHeader, Card, EmptyState } from "./shared.jsx";
 import { History, Plus, Pencil, Trash2 } from "lucide-react";
 
-const TABLE_LABELS = {
+export const TABLE_LABELS = {
   attendance: "Absensi Mapel",
   points: "Poin & Catatan",
   practice_scores: "Nilai Harian",
   final_exam_scores: "Ujian Akhir",
   grade_weights: "Bobot Nilai Akhir",
   notes: "Catatan Wali Kelas",
+  student_profiles: "Biodata Siswa",
   homeroom_attendance: "Absensi Kelas",
   savings: "Tabungan",
   students: "Data Siswa",
   classes: "Data Kelas",
 };
 
-const ACTION_LABEL = { INSERT: "menambahkan", UPDATE: "mengubah", DELETE: "menghapus" };
-const ACTION_ICON = { INSERT: Plus, UPDATE: Pencil, DELETE: Trash2 };
-const ACTION_COLOR = { INSERT: GREEN, UPDATE: "#B8760F", DELETE: RED };
+export const ACTION_LABEL = { INSERT: "menambahkan", UPDATE: "mengubah", DELETE: "menghapus" };
+export const ACTION_ICON = { INSERT: Plus, UPDATE: Pencil, DELETE: Trash2 };
+export const ACTION_COLOR = { INSERT: GREEN, UPDATE: "#B8760F", DELETE: RED };
 
-function describeDetail(tableName, data, studentMap) {
+export function describeDetail(tableName, data, studentMap) {
   if (!data) return "";
   const parts = [];
   if (data.student_id && studentMap[data.student_id]) parts.push(`Siswa: ${studentMap[data.student_id]}`);
@@ -44,6 +45,10 @@ function describeDetail(tableName, data, studentMap) {
       break;
     case "notes":
       if (data.content) parts.push(`"${data.content}"`);
+      break;
+    case "student_profiles":
+      if (data.address) parts.push(`Alamat diisi`);
+      if (data.parent_phone) parts.push(`WA Ortu diisi`);
       break;
     case "savings":
       if (data.type) parts.push(data.type === "setor" ? "Setor" : "Tarik");

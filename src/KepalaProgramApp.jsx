@@ -359,7 +359,7 @@ function SiswaKaprogTab({ classes, notify }) {
 }
 
 // ================= REKAP ABSENSI (semua kelas dalam satu jurusan) =================
-function AbsensiRekapTab({ classes }) {
+export function AbsensiRekapTab({ classes, eyebrow = "Kepala Program · read-only" }) {
   const [date, setDate] = useState(todayStr());
   const [students, setStudents] = useState([]);
   const [records, setRecords] = useState([]);
@@ -392,7 +392,7 @@ function AbsensiRekapTab({ classes }) {
 
   return (
     <div>
-      <PageHeader eyebrow="Kepala Program · read-only" title="Rekap Absensi Kelas Harian" />
+      <PageHeader eyebrow={eyebrow} title="Rekap Absensi Kelas Harian" />
       <Card className="mb-5">
         <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="text-sm px-3 py-2 rounded-lg font-semibold" style={{ background: BG, color: INK }} />
         <div className="text-xs mt-2" style={{ color: MUTED }}>Data ini diisi wali kelas / sekretaris masing-masing kelas, tidak bisa diubah di sini.</div>
@@ -555,7 +555,7 @@ function RekapTotalAbsensiTab({ classes, jurusanName }) {
 }
 
 // ================= REKAP TABUNGAN (semua kelas dalam satu jurusan) =================
-function TabunganRekapTab({ classes }) {
+export function TabunganRekapTab({ classes, eyebrow = "Kepala Program · read-only" }) {
   const [students, setStudents] = useState([]);
   const [log, setLog] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -590,7 +590,7 @@ function TabunganRekapTab({ classes }) {
 
   return (
     <div>
-      <PageHeader eyebrow="Kepala Program · read-only" title="Rekap Tabungan Siswa" />
+      <PageHeader eyebrow={eyebrow} title="Rekap Tabungan Siswa" />
       <Card className="mb-5">
         <div className="text-xs font-semibold mb-1" style={{ color: MUTED }}>Total Tabungan Seluruh Jurusan</div>
         <div className="text-2xl font-bold" style={{ color: NAVY }}>{rupiah(grandTotal)}</div>

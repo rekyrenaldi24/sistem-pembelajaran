@@ -6,9 +6,10 @@ import GuruApp from "./GuruApp.jsx";
 import WaliKelasApp from "./WaliKelasApp.jsx";
 import SiswaApp from "./SiswaApp.jsx";
 import KepalaProgramApp from "./KepalaProgramApp.jsx";
+import AdminApp from "./AdminApp.jsx";
 import BiodataFormPublic from "./BiodataFormPublic.jsx";
 import { NAVY, NAVY2, ORANGE, BG, MUTED } from "./shared.jsx";
-import { Loader2, LogOut, Clock, GraduationCap, Users2, BarChart3 } from "lucide-react";
+import { Loader2, LogOut, Clock, GraduationCap, Users2, BarChart3, ShieldCheck } from "lucide-react";
 
 export default function App() {
   const [session, setSession] = useState(undefined); // undefined = belum tahu, null = belum login
@@ -93,9 +94,11 @@ export default function App() {
   const isWaliKelas = !!profile.is_wali_kelas || profile.role === "wali_kelas";
   const isKepalaProgram = !!profile.is_kepala_program;
   const isSiswa = !!profile.is_siswa;
+  const isAdmin = !!profile.is_admin;
 
   // Daftar peran yang dimiliki akun ini (satu akun bisa punya lebih dari satu).
   const availableRoles = [
+    isAdmin && { key: "admin", label: "Admin", icon: ShieldCheck, subtitle: "Pantau semua & kelola data" },
     isGuru && { key: "guru", label: "Guru Mapel", icon: GraduationCap, subtitle: profile.subject || "—" },
     isWaliKelas && { key: "wali_kelas", label: "Wali Kelas", icon: Users2, subtitle: "Absensi, catatan & tabungan" },
     isKepalaProgram && { key: "kepala_program", label: "Kepala Program", icon: BarChart3, subtitle: "Pantau absen & tabungan jurusan" },
@@ -144,6 +147,7 @@ export default function App() {
   const onSwitchRole = canSwitchRole ? () => setActiveRole(null) : undefined;
   const onLogout = () => supabase.auth.signOut();
 
+  if (role === "admin") return <AdminApp profile={profile} onLogout={onLogout} onSwitchRole={onSwitchRole} />;
   if (role === "guru") return <GuruApp profile={profile} onLogout={onLogout} onSwitchRole={onSwitchRole} />;
   if (role === "wali_kelas") return <WaliKelasApp profile={profile} onLogout={onLogout} onSwitchRole={onSwitchRole} />;
   if (role === "siswa") return <SiswaApp profile={profile} onLogout={onLogout} onSwitchRole={onSwitchRole} />;
