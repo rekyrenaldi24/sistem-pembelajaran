@@ -1144,7 +1144,7 @@ function SiswaTab({ profile, classes, activeClassId, setActiveClassId, students,
 
   return (
     <div>
-      <PageHeader eyebrow="Kelas yang Anda Ampu" title="Kelas & Siswa" right={<ClassPicker classes={classes} value={activeClassId} onChange={setActiveClassId} />} />
+      <PageHeader eyebrow="Kelas yang Anda Ampu" title="Kelas & Siswa" right={<ClassPicker classes={classes} value={activeClassId} onChange={setActiveClassId} students={students} />} />
       {addClassCard}
       <Card>
         <div className="flex items-center justify-between mb-3 flex-wrap gap-2">

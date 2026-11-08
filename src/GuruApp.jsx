@@ -4,7 +4,7 @@ import {
   NAVY, NAVY2, ORANGE, BG, INK, MUTED, GREEN, RED,
   ATT_STATUSES, POINT_CATEGORIES, todayStr, gradeLetter,
   computeFinalScore, exportToExcel, downloadStudentTemplate, parseStudentsExcel,
-  PageHeader, Card, EmptyState, ClassPicker, Toast, OfflineBanner, useOfflineStatus, fetchAllRows, TingkatFilter, classTingkatKey,
+  PageHeader, Card, EmptyState, ClassPicker, Toast, OfflineBanner, useOfflineStatus, fetchAllRows, TingkatFilter, classTingkatKey, GenderCounts, countGender, useGenderCounts, genderCountsFor,
 } from "./shared.jsx";
 import { offlineWrite, genId } from "./offlineSync.js";
 import {
@@ -344,8 +344,27 @@ function PoinTab({ profile, classes, activeClassId, setActiveClassId, students, 
 // ================= NILAI PRAKTEK HARIAN =================
 // ================= TES KEBUGARAN (TKJI) =================
 // ================= TES KEBUGARAN — wrapper pemilih mode =================
+// Menyimpan hasil satu tes ke tujuan yang dipilih di menu Tes Kebugaran:
+//  - "harian": jadi satu baris Nilai Harian (seperti biasa)
+//  - "ujian" : jadi nilai TES PRAKTIK untuk Ujian Akhir. Satu siswa bisa
+//    punya beberapa tes (beda nama tes); tes ulang dengan nama yang sama
+//    menimpa nilai lama. Nilai Ujian Akhir = rata-rata semua tesnya.
+async function saveTestResult({ dest, profile, studentId, testName, score, note }) {
+  const scoreVal = Math.max(0, Math.min(100, Number(score)));
+  if (dest === "ujian") {
+    return offlineWrite(
+      "final_exam_tests", "upsert",
+      { student_id: studentId, guru_id: profile.id, subject: profile.subject, test_name: testName, score: scoreVal, note },
+      { onConflict: "student_id,guru_id,subject,test_name" }
+    );
+  }
+  const row = { id: genId(), student_id: studentId, guru_id: profile.id, subject: profile.subject, date: todayStr(), score: scoreVal, note };
+  return offlineWrite("practice_scores", "insert", row);
+}
+
 function TkjiTab({ profile, classes, activeClassId, setActiveClassId, students, notify }) {
   const [mode, setMode] = useState("tkji"); // "tkji" | "beep" | "bebas"
+  const [dest, setDest] = useState("harian"); // "harian" | "ujian"
   const modes = [
     { key: "tkji", label: "TKJI (Resmi)" },
     { key: "beep", label: "Beep Test (MFT)" },
@@ -363,14 +382,30 @@ function TkjiTab({ profile, classes, activeClassId, setActiveClassId, students, 
           </button>
         ))}
       </div>
-      {mode === "tkji" && <TkjiMode profile={profile} classes={classes} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} notify={notify} />}
-      {mode === "beep" && <BeepTestMode profile={profile} classes={classes} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} notify={notify} />}
-      {mode === "bebas" && <TesBebasMode profile={profile} classes={classes} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} notify={notify} />}
+      <Card className="mb-5" style={dest === "ujian" ? { boxShadow: `inset 0 0 0 2px ${ORANGE}` } : undefined}>
+        <div className="text-sm font-bold mb-2" style={{ color: INK }}>Simpan hasil tes ke:</div>
+        <div className="flex gap-2 flex-wrap mb-2">
+          {[["harian", "Nilai Harian"], ["ujian", "Ujian Akhir (Praktik)"]].map(([k, label]) => (
+            <button key={k} onClick={() => setDest(k)} className="text-xs font-bold px-3 py-1.5 rounded-full"
+              style={{ background: dest === k ? ORANGE : "#EEF0F3", color: dest === k ? "#fff" : MUTED }}>
+              {label}
+            </button>
+          ))}
+        </div>
+        <div className="text-xs" style={{ color: dest === "ujian" ? "#9A4A22" : MUTED }}>
+          {dest === "ujian"
+            ? "Hasil tes masuk ke nilai Ujian Akhir. Boleh beberapa tes (TKJI, Beep Test, dan Tes Bebas dengan nama berbeda): nilai Ujian Akhir siswa = rata-rata semua tesnya. Mengulang tes dengan nama yang sama menimpa nilai lama."
+            : "Hasil tes masuk ke Nilai Harian sebagai satu nilai tugas. Pilih \"Ujian Akhir (Praktik)\" kalau ini tes untuk penilaian akhir semester."}
+        </div>
+      </Card>
+      {mode === "tkji" && <TkjiMode profile={profile} classes={classes} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} notify={notify} dest={dest} />}
+      {mode === "beep" && <BeepTestMode profile={profile} classes={classes} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} notify={notify} dest={dest} />}
+      {mode === "bebas" && <TesBebasMode profile={profile} classes={classes} activeClassId={activeClassId} setActiveClassId={setActiveClassId} students={students} notify={notify} dest={dest} />}
     </div>
   );
 }
 
-function TkjiMode({ profile, classes, activeClassId, setActiveClassId, students, notify }) {
+function TkjiMode({ profile, classes, activeClassId, setActiveClassId, students, notify, dest }) {
   const [studentId, setStudentId] = useState("");
   const [draftMap, setDraftMap] = useState({});
   const emptyForm = { lari60: "", gantung: "", situp: "", loncat: "", lariMenit: "", lariDetik: "" };
@@ -446,14 +481,14 @@ function TkjiMode({ profile, classes, activeClassId, setActiveClassId, students,
     setSending(true);
     const mmssLabel = `${form.lariMenit || 0}'${String(form.lariDetik || 0).padStart(2, "0")}"`;
     const note = `Tes Kebugaran (TKJI): Lari 60m ${form.lari60}dtk (nilai ${s1}), ${gantungLabel(gender)} ${form.gantung} (nilai ${s2}), Baring Duduk ${form.situp}x (nilai ${s3}), Loncat Tegak ${form.loncat}cm (nilai ${s4}), ${lariJauhLabel(gender)} ${mmssLabel} (nilai ${s5}). Total ${total} = ${category}.`;
-    const row = { id: genId(), student_id: studentId, guru_id: profile.id, subject: profile.subject, date: todayStr(), score: totalToScale100(total), note };
-    const { error, offline } = await offlineWrite("practice_scores", "insert", row);
+    const { error, offline } = await saveTestResult({ dest, profile, studentId, testName: "TKJI", score: totalToScale100(total), note });
     if (error) { setSending(false); return notify("Gagal: " + error.message); }
     await offlineWrite("fitness_tests", "delete", null, { match: { student_id: studentId } });
     setDraftMap((m) => { const next = { ...m }; delete next[studentId]; return next; });
     setForm(emptyForm);
     setSending(false);
-    notify(offline ? "Tersimpan offline, akan disinkron & masuk ke Nilai Harian otomatis." : `Hasil TKJI (${category}) sudah masuk ke Nilai Harian.`);
+    const tujuan = dest === "ujian" ? "Ujian Akhir" : "Nilai Harian";
+    notify(offline ? `Tersimpan offline, akan disinkron & masuk ke ${tujuan} otomatis.` : `Hasil TKJI (${category}) sudah masuk ke ${tujuan}.`);
   };
 
   const NumField = ({ label, value, onChange, onBlur, scoreVal, placeholder }) => (
@@ -530,13 +565,13 @@ function TkjiMode({ profile, classes, activeClassId, setActiveClassId, students,
                 {complete ? (
                   <div className="text-sm font-bold" style={{ color: INK }}>Total {total} — Kategori: {category}</div>
                 ) : (
-                  <div className="text-xs" style={{ color: MUTED }}>Lengkapi ke-5 item dulu untuk melihat kategori & mengirim ke Nilai Harian.</div>
+                  <div className="text-xs" style={{ color: MUTED }}>Lengkapi ke-5 item dulu untuk melihat kategori & mengirim ke {dest === "ujian" ? "Ujian Akhir" : "Nilai Harian"}.</div>
                 )}
               </div>
               <button onClick={sendToNilaiPraktik} disabled={!complete || sending}
                 className="px-4 py-2 rounded-lg text-sm font-semibold text-white shrink-0"
                 style={{ background: NAVY, opacity: (!complete || sending) ? 0.5 : 1 }}>
-                {sending ? "Mengirim…" : "Kirim ke Nilai Harian"}
+                {sending ? "Mengirim…" : `Kirim ke ${dest === "ujian" ? "Ujian Akhir" : "Nilai Harian"}`}
               </button>
             </div>
           </Card>
@@ -547,7 +582,7 @@ function TkjiMode({ profile, classes, activeClassId, setActiveClassId, students,
 }
 
 // ================= BEEP TEST (MFT) =================
-function BeepTestMode({ profile, students, notify }) {
+function BeepTestMode({ profile, students, notify, dest }) {
   const [studentId, setStudentId] = useState("");
   const [level, setLevel] = useState("");
   const [shuttle, setShuttle] = useState("");
@@ -574,12 +609,12 @@ function BeepTestMode({ profile, students, notify }) {
     if (!studentId || vo2 == null || scaledScore == null) return;
     setSending(true);
     const note = `Beep Test/MFT: Level ${level} Shuttle ${shuttle}, usia ${age} th. Estimasi VO2max ${vo2} ml/kg/menit — Kategori: ${category}. Skala nilai: VO2max ${worst}=0, ${best}=100. (Estimasi rumus umum, bukan standar baku — mohon dicek ulang.)`;
-    const row = { id: genId(), student_id: studentId, guru_id: profile.id, subject: profile.subject, date: todayStr(), score: scaledScore, note };
-    const { error, offline } = await offlineWrite("practice_scores", "insert", row);
+    const { error, offline } = await saveTestResult({ dest, profile, studentId, testName: "Beep Test", score: scaledScore, note });
     setSending(false);
     if (error) return notify("Gagal: " + error.message);
     setLevel(""); setShuttle("");
-    notify(offline ? "Tersimpan offline, akan disinkron & masuk ke Nilai Harian otomatis." : `Hasil Beep Test (${category}) sudah masuk ke Nilai Harian.`);
+    const tujuan = dest === "ujian" ? "Ujian Akhir" : "Nilai Harian";
+    notify(offline ? `Tersimpan offline, akan disinkron & masuk ke ${tujuan} otomatis.` : `Hasil Beep Test (${category}) sudah masuk ke ${tujuan}.`);
   };
 
   return (
@@ -653,7 +688,7 @@ function BeepTestMode({ profile, students, notify }) {
               <button onClick={send} disabled={vo2 == null || scaledScore == null || sending}
                 className="px-4 py-2 rounded-lg text-sm font-semibold text-white shrink-0"
                 style={{ background: NAVY, opacity: (vo2 == null || scaledScore == null || sending) ? 0.5 : 1 }}>
-                {sending ? "Mengirim…" : "Kirim ke Nilai Harian"}
+                {sending ? "Mengirim…" : `Kirim ke ${dest === "ujian" ? "Ujian Akhir" : "Nilai Harian"}`}
               </button>
             </div>
           </Card>
@@ -664,7 +699,7 @@ function BeepTestMode({ profile, students, notify }) {
 }
 
 // ================= TES BEBAS =================
-function TesBebasMode({ profile, students, notify }) {
+function TesBebasMode({ profile, students, notify, dest }) {
   const draftKey = `r3edu_tes_bebas_draft_${profile.id}`;
   const [presets, setPresets] = useState(() => {
     try { return JSON.parse(localStorage.getItem("r3edu_tes_bebas_presets") || "[]"); } catch { return []; }
@@ -710,13 +745,22 @@ function TesBebasMode({ profile, students, notify }) {
   // dobel (jadi update, bukan tambah baris baru).
   const loadEntries = useCallback(async () => {
     if (!students.length) { setEntries([]); return; }
+    if (dest === "ujian") {
+      // Mode Ujian Akhir: hasil tes disimpan per nama tes (bukan per hari).
+      const { data } = await supabase.from("final_exam_tests").select("student_id,test_name,score")
+        .eq("guru_id", profile.id).eq("subject", profile.subject).in("student_id", students.map((s) => s.id));
+      setEntries(data || []);
+      return;
+    }
     const { data } = await supabase.from("practice_scores").select("*").eq("guru_id", profile.id).eq("subject", profile.subject)
       .eq("date", todayStr()).in("student_id", students.map((s) => s.id)).like("note", "Tes Bebas —%");
     setEntries(data || []);
-  }, [students, profile.id, profile.subject]);
+  }, [students, profile.id, profile.subject, dest]);
   useEffect(() => { loadEntries(); }, [loadEntries]);
 
-  const currentTestEntries = entries.filter((e) => (e.note || "").startsWith(`Tes Bebas — ${testName.trim()}:`));
+  const currentTestEntries = dest === "ujian"
+    ? entries.filter((e) => e.test_name === testName.trim())
+    : entries.filter((e) => (e.note || "").startsWith(`Tes Bebas — ${testName.trim()}:`));
   const submittedIds = new Set(currentTestEntries.map((e) => e.student_id));
 
   // Kalau siswa yang dipilih sudah punya nilai untuk tes ini, tampilkan
@@ -751,7 +795,11 @@ function TesBebasMode({ profile, students, notify }) {
     const scoreVal = Math.max(0, Math.min(100, finalScore));
     const existing = currentTestEntries.find((e) => e.student_id === studentId);
     let res;
-    if (existing) {
+    if (dest === "ujian") {
+      const nm = testName.trim();
+      res = await saveTestResult({ dest, profile, studentId, testName: nm, score: scoreVal, note });
+      if (!res.error) setEntries((es) => [{ student_id: studentId, test_name: nm, score: scoreVal }, ...es.filter((e) => !(e.student_id === studentId && e.test_name === nm))]);
+    } else if (existing) {
       res = await offlineWrite("practice_scores", "update", { score: scoreVal, note }, { match: { id: existing.id } });
       if (!res.error) setEntries((es) => es.map((e) => (e.id === existing.id ? { ...e, score: scoreVal, note } : e)));
     } else {
@@ -762,7 +810,8 @@ function TesBebasMode({ profile, students, notify }) {
     setSending(false);
     if (res.error) return notify("Gagal: " + res.error.message);
     setRaw(""); setManualScore("");
-    notify(res.offline ? "Tersimpan offline, akan disinkron & masuk ke Nilai Harian otomatis." : (existing ? "Nilai diperbarui." : "Hasil tes sudah masuk ke Nilai Harian."));
+    const tujuan = dest === "ujian" ? "Ujian Akhir" : "Nilai Harian";
+    notify(res.offline ? `Tersimpan offline, akan disinkron & masuk ke ${tujuan} otomatis.` : (existing ? "Nilai diperbarui." : `Hasil tes sudah masuk ke ${tujuan}.`));
   };
 
   return (
@@ -815,7 +864,7 @@ function TesBebasMode({ profile, students, notify }) {
           <Card className="md:w-64 shrink-0" style={{ padding: 0 }}>
             <div className="px-4 pt-4 pb-2 text-sm font-bold" style={{ color: INK }}>Daftar Siswa</div>
             {testName.trim() && (
-              <div className="px-4 pb-2 text-xs" style={{ color: MUTED }}>{submittedIds.size}/{students.length} sudah diisi hari ini</div>
+              <div className="px-4 pb-2 text-xs" style={{ color: MUTED }}>{submittedIds.size}/{students.length} sudah diisi{dest === "ujian" ? "" : " hari ini"}</div>
             )}
             <div className="flex flex-col divide-y max-h-[70vh] overflow-y-auto" style={{ borderColor: "#EEF0F3" }}>
               {students.map((s) => (
@@ -846,7 +895,7 @@ function TesBebasMode({ profile, students, notify }) {
             <button onClick={send} disabled={!testName.trim() || finalScore == null || sending}
               className="mt-4 px-4 py-2 rounded-lg text-sm font-semibold text-white"
               style={{ background: NAVY, opacity: (!testName.trim() || finalScore == null || sending) ? 0.5 : 1 }}>
-              {sending ? "Mengirim…" : submittedIds.has(studentId) ? "Perbarui Nilai" : "Kirim ke Nilai Harian"}
+              {sending ? "Mengirim…" : submittedIds.has(studentId) ? "Perbarui Nilai" : `Kirim ke ${dest === "ujian" ? "Ujian Akhir" : "Nilai Harian"}`}
             </button>
           </Card>
         </div>
@@ -863,6 +912,9 @@ function PraktekTab({ profile, classes, activeClassId, setActiveClassId, student
   const [scores, setScores] = useState({});
   const [entries, setEntries] = useState([]);
   const [expandedTugas, setExpandedTugas] = useState({});
+  const [renamingKey, setRenamingKey] = useState(null);
+  const [renameValue, setRenameValue] = useState("");
+  const [renameBusy, setRenameBusy] = useState(false);
 
   // Muat tugas yang sedang berjalan (tanggal + nama tugas terakhir dipakai
   // untuk kelas ini) tiap kali kelas berganti — supaya kalau laptop
@@ -947,6 +999,37 @@ function PraktekTab({ profile, classes, activeClassId, setActiveClassId, student
       if (idx !== -1) return n.slice(0, idx);
     }
     return n;
+  };
+
+  // Ubah nama satu tugas (semua nilai di tanggal + nama itu ikut berganti).
+  // Berguna untuk nilai yang dulu lupa diberi nama. Untuk tugas dari Tes
+  // Bebas, awalan "Tes Bebas — " dijaga supaya tetap terkumpul jadi satu tugas.
+  const TB_PREFIX = "Tes Bebas — ";
+  const renameTugas = async (t) => {
+    const oldIdentity = t.materi === "(tanpa nama tugas)" ? "" : t.materi;
+    const isTB = oldIdentity.startsWith(TB_PREFIX);
+    const typed = renameValue.trim();
+    if (!typed) return notify("Nama tugas wajib diisi.");
+    const newIdentity = isTB ? TB_PREFIX + typed : typed;
+    if (newIdentity === oldIdentity) { setRenamingKey(null); return; }
+    const ids = new Set(t.entries.map((e) => e.student_id));
+    const clash = entries.some((e) => e.date === t.date && taskIdentity(e.note) === newIdentity && ids.has(e.student_id));
+    if (clash) return notify("Di tanggal yang sama sudah ada tugas dengan nama itu untuk sebagian siswa. Pakai nama lain.");
+    setRenameBusy(true);
+    const updates = t.entries.map((e) => {
+      const old = e.note || "";
+      const newNote = oldIdentity && old.startsWith(oldIdentity) && isTB ? newIdentity + old.slice(oldIdentity.length) : newIdentity;
+      return { id: e.id, note: newNote };
+    });
+    const results = await Promise.all(updates.map((u) => offlineWrite("practice_scores", "update", { note: u.note }, { match: { id: u.id } })));
+    setRenameBusy(false);
+    const failed = results.find((r) => r.error);
+    if (failed) return notify("Gagal mengubah nama: " + failed.error.message);
+    setEntries((es) => es.map((e) => { const u = updates.find((x) => x.id === e.id); return u ? { ...e, note: u.note } : e; }));
+    if (date === t.date && materi.trim() === oldIdentity) setMateri(newIdentity);
+    setExpandedTugas((ex) => ({ ...ex, [`${t.date}|${newIdentity}`]: true }));
+    setRenamingKey(null);
+    notify(results.some((r) => r.offline) ? "Tersimpan offline, akan disinkron otomatis." : "Nama tugas diubah.");
   };
 
   // siapa saja yang sudah/belum mengumpulkan untuk sesi tanggal + nama tugas yang sedang diisi
@@ -1034,17 +1117,43 @@ function PraktekTab({ profile, classes, activeClassId, setActiveClassId, student
                   </button>
                   {isOpen && (
                     <div className="px-5 pb-4">
-                      <button
-                        onClick={() => {
-                          setDate(t.date);
-                          setMateri(t.materi === "(tanpa nama tugas)" ? "" : t.materi);
-                          window.scrollTo({ top: 0, behavior: "smooth" });
-                        }}
-                        className="text-xs font-bold px-3 py-1.5 rounded-md text-white mb-2"
-                        style={{ background: missing.length ? ORANGE : NAVY }}
-                      >
-                        ↑ Lanjutkan Isi Tugas Ini{missing.length > 0 ? ` — Susulan (${missing.length} belum)` : ""}
-                      </button>
+                      <div className="flex flex-wrap gap-2 mb-2">
+                        <button
+                          onClick={() => {
+                            setDate(t.date);
+                            setMateri(t.materi === "(tanpa nama tugas)" ? "" : t.materi);
+                            window.scrollTo({ top: 0, behavior: "smooth" });
+                          }}
+                          className="text-xs font-bold px-3 py-1.5 rounded-md text-white"
+                          style={{ background: missing.length ? ORANGE : NAVY }}
+                        >
+                          ↑ Lanjutkan Isi Tugas Ini{missing.length > 0 ? ` — Susulan (${missing.length} belum)` : ""}
+                        </button>
+                        {renamingKey !== key && (
+                          <button
+                            onClick={() => {
+                              setRenamingKey(key);
+                              const cur = t.materi === "(tanpa nama tugas)" ? "" : t.materi;
+                              setRenameValue(cur.startsWith(TB_PREFIX) ? cur.slice(TB_PREFIX.length) : cur);
+                            }}
+                            className="text-xs font-bold px-3 py-1.5 rounded-md flex items-center gap-1"
+                            style={{ background: BG, color: INK }}
+                          >
+                            <Pencil size={11} /> Ubah Nama Tugas
+                          </button>
+                        )}
+                      </div>
+                      {renamingKey === key && (
+                        <div className="flex gap-2 flex-wrap mb-3 p-3 rounded-lg" style={{ background: BG }}>
+                          <input value={renameValue} onChange={(e) => setRenameValue(e.target.value)} onKeyDown={(e) => e.key === "Enter" && renameTugas(t)}
+                            placeholder="Nama tugas, mis. Tugas Bab 3" className="text-sm px-3 py-2 rounded-lg flex-1 min-w-[200px]" style={{ background: "white", color: INK }} />
+                          <button onClick={() => renameTugas(t)} disabled={renameBusy} className="px-3.5 py-2 rounded-lg text-xs font-bold text-white" style={{ background: NAVY, opacity: renameBusy ? 0.6 : 1 }}>
+                            {renameBusy ? "Menyimpan…" : "Simpan Nama"}
+                          </button>
+                          <button onClick={() => setRenamingKey(null)} className="px-3.5 py-2 rounded-lg text-xs font-semibold" style={{ background: "white", color: MUTED }}>Batal</button>
+                          <div className="w-full text-xs" style={{ color: MUTED }}>Semua nilai di tugas ini (tanggal {t.date}) ikut memakai nama baru.</div>
+                        </div>
+                      )}
                       {missing.length > 0 && (
                         <div className="text-xs mb-2 px-3 py-2 rounded-lg" style={{ background: "#FFF4EE", color: "#9A4A22" }}>
                           Belum mengumpulkan: {missing.map((s) => s.name).join(", ")}
@@ -1079,17 +1188,36 @@ function PraktekTab({ profile, classes, activeClassId, setActiveClassId, student
 // ================= UJIAN AKHIR =================
 function UjianTab({ profile, classes, activeClassId, setActiveClassId, students, notify }) {
   const [scores, setScores] = useState({});
+  const [tests, setTests] = useState([]); // hasil tes praktik (dari menu Tes Kebugaran)
 
   const load = useCallback(async () => {
-    if (!students.length) { setScores({}); return; }
-    const { data } = await supabase.from("final_exam_scores").select("*").eq("guru_id", profile.id).eq("subject", profile.subject)
-      .in("student_id", students.map((s) => s.id));
+    if (!students.length) { setScores({}); setTests([]); return; }
+    const ids = students.map((s) => s.id);
+    const [exam, tst] = await Promise.all([
+      supabase.from("final_exam_scores").select("*").eq("guru_id", profile.id).eq("subject", profile.subject).in("student_id", ids),
+      supabase.from("final_exam_tests").select("*").eq("guru_id", profile.id).eq("subject", profile.subject).in("student_id", ids).order("test_name"),
+    ]);
     const map = {};
-    (data || []).forEach((r) => { map[r.student_id] = r.score; });
+    (exam.data || []).forEach((r) => { map[r.student_id] = r.score; });
     setScores(map);
+    setTests(tst.error ? [] : (tst.data || []));
   }, [students, profile.id, profile.subject]);
 
   useEffect(() => { load(); }, [load]);
+
+  const testNames = useMemo(() => Array.from(new Set(tests.map((t) => t.test_name))).sort(), [tests]);
+  const byStudent = useMemo(() => {
+    const m = {};
+    tests.forEach((t) => { (m[t.student_id] = m[t.student_id] || []).push(t); });
+    return m;
+  }, [tests]);
+  const avgOf = (list) => Math.round((list.reduce((a, t) => a + Number(t.score), 0) / list.length) * 10) / 10;
+
+  const removeTest = async (t) => {
+    if (!window.confirm(`Hapus nilai tes "${t.test_name}" untuk siswa ini?`)) return;
+    setTests((ts) => ts.filter((x) => x.id !== t.id));
+    await offlineWrite("final_exam_tests", "delete", null, { match: { id: t.id } });
+  };
 
   const updateScore = async (studentId, value) => {
     const v = value === "" ? "" : Math.max(0, Math.min(100, Number(value)));
@@ -1107,16 +1235,56 @@ function UjianTab({ profile, classes, activeClassId, setActiveClassId, students,
   return (
     <div>
       <PageHeader eyebrow={`Mapel ${profile.subject}`} title="Ujian Akhir" right={<ClassPicker classes={classes} value={activeClassId} onChange={setActiveClassId} />} />
+      <Card className="mb-5">
+        {testNames.length > 0 ? (
+          <div className="text-xs" style={{ color: MUTED }}>
+            <b style={{ color: INK }}>{testNames.length} tes praktik</b> di kelas ini: {testNames.join(", ")}. Siswa yang sudah ikut tes nilai Ujian Akhirnya
+            <b> otomatis = rata-rata semua tesnya</b>. Siswa yang belum punya hasil tes bisa diisi manual di kolom nilai.
+          </div>
+        ) : (
+          <div className="text-xs" style={{ color: MUTED }}>
+            Mau memakai hasil <b>Tes Kebugaran</b> sebagai Ujian Akhir? Buka menu Tes Kebugaran, lalu pilih <b>"Simpan hasil tes ke: Ujian Akhir (Praktik)"</b>.
+            Hasilnya akan muncul di sini. Atau isi nilai manual di bawah.
+          </div>
+        )}
+      </Card>
       <Card style={{ padding: 0 }}>
         {students.length === 0 ? <EmptyState icon={FileSpreadsheet} text="Belum ada siswa di kelas ini." /> : (
           <div className="flex flex-col divide-y" style={{ borderColor: "#EEF0F3" }}>
-            {students.map((s, i) => (
-              <div key={s.id} className="flex items-center justify-between py-2.5 px-5" style={{ background: i % 2 === 0 ? "white" : BG }}>
-                <span className="text-sm font-medium" style={{ color: INK }}>{s.name}</span>
-                <input type="number" min={0} max={100} value={scores[s.id] ?? ""} onChange={(e) => updateScore(s.id, e.target.value)}
-                  placeholder="0-100" className="w-20 text-center text-sm px-2 py-1.5 rounded-md" style={{ background: "white", boxShadow: "inset 0 0 0 1px #E7E9EE", color: INK }} />
-              </div>
-            ))}
+            {students.map((s, i) => {
+              const list = byStudent[s.id] || [];
+              const done = new Set(list.map((t) => t.test_name));
+              const missing = testNames.filter((n) => !done.has(n));
+              return (
+                <div key={s.id} className="py-2.5 px-5" style={{ background: i % 2 === 0 ? "white" : BG }}>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-sm font-medium" style={{ color: INK }}>{s.name}</span>
+                    {list.length > 0 ? (
+                      <div className="text-right shrink-0">
+                        <div className="text-lg font-bold leading-tight" style={{ color: INK }}>{avgOf(list)}</div>
+                        <div className="text-xs" style={{ color: MUTED }}>rata-rata {list.length} tes</div>
+                      </div>
+                    ) : (
+                      <input type="number" min={0} max={100} value={scores[s.id] ?? ""} onChange={(e) => updateScore(s.id, e.target.value)}
+                        placeholder="0-100" className="w-20 text-center text-sm px-2 py-1.5 rounded-md" style={{ background: "white", boxShadow: "inset 0 0 0 1px #E7E9EE", color: INK }} />
+                    )}
+                  </div>
+                  {(list.length > 0 || (testNames.length > 0 && missing.length > 0)) && (
+                    <div className="flex flex-wrap gap-1.5 mt-1.5">
+                      {list.map((t) => (
+                        <span key={t.id} className="text-xs px-2 py-0.5 rounded-md inline-flex items-center gap-1" style={{ background: "#EEF0F3", color: INK }}>
+                          {t.test_name}: <b>{Number(t.score)}</b>
+                          <button onClick={() => removeTest(t)} title="Hapus nilai tes ini" style={{ color: MUTED, lineHeight: 1 }}>×</button>
+                        </span>
+                      ))}
+                      {missing.length > 0 && (
+                        <span className="text-xs px-2 py-0.5 rounded-md" style={{ background: "#FFF4EE", color: "#9A4A22" }}>Belum ikut: {missing.join(", ")}</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
       </Card>
@@ -1150,14 +1318,19 @@ function NilaiAkhirTab({ profile, classes, activeClassId, setActiveClassId, stud
     if (!students.length) { setAttendance([]); setPractice([]); setExams({}); setPoints([]); setLoading(false); return; }
     setLoading(true);
     const ids = students.map((s) => s.id);
-    const [att, prac, exam, pts] = await Promise.all([
+    const [att, prac, exam, pts, tst] = await Promise.all([
       fetchAllRows(() => supabase.from("attendance").select("student_id,status,date").eq("guru_id", profile.id).eq("subject", profile.subject).in("student_id", ids)),
       fetchAllRows(() => supabase.from("practice_scores").select("student_id,score").eq("guru_id", profile.id).eq("subject", profile.subject).in("student_id", ids)),
       supabase.from("final_exam_scores").select("student_id,score").eq("guru_id", profile.id).eq("subject", profile.subject).in("student_id", ids),
       fetchAllRows(() => supabase.from("points").select("student_id,type").eq("guru_id", profile.id).in("student_id", ids)),
+      fetchAllRows(() => supabase.from("final_exam_tests").select("student_id,score").eq("guru_id", profile.id).eq("subject", profile.subject).in("student_id", ids)),
     ]);
     setAttendance(att.data || []); setPractice(prac.data || []); setPoints(pts.data || []);
     const exMap = {}; (exam.data || []).forEach((r) => { exMap[r.student_id] = r.score; });
+    // Siswa yang punya hasil tes praktik: Ujian Akhir = rata-rata tesnya.
+    const tmp = {};
+    (tst.data || []).forEach((r) => { if (!tmp[r.student_id]) tmp[r.student_id] = []; tmp[r.student_id].push(Number(r.score)); });
+    Object.keys(tmp).forEach((id) => { exMap[id] = Math.round((tmp[id].reduce((a, b) => a + b, 0) / tmp[id].length) * 10) / 10; });
     setExams(exMap);
     setLoading(false);
   }, [students, profile.id, profile.subject]);
@@ -1359,6 +1532,7 @@ function SiswaTab({ profile, classes, activeClassId, setActiveClassId, students,
   }, []);
 
   // Pilih tingkat dulu (10/11/12); daftar kelas di bawahnya menyesuaikan.
+  const genderMap = useGenderCounts(students.length);
   const [tkSel, setTkSel] = useState(null);
   const activeCls = classes.find((c) => c.id === activeClassId);
   const tk = tkSel ?? (activeCls ? classTingkatKey(activeCls) : "10");
@@ -1397,8 +1571,11 @@ function SiswaTab({ profile, classes, activeClassId, setActiveClassId, students,
                   <button key={c.id} onClick={() => setActiveClassId(c.id)}
                     className="flex items-center justify-between py-2.5 text-left"
                     style={{ color: c.id === activeClassId ? ORANGE : INK }}>
-                    <span className="text-sm font-medium">{c.name}</span>
-                    {c.id === activeClassId && <span className="text-xs font-bold">Dipilih ✓</span>}
+                    <span className="flex flex-col gap-1 min-w-0">
+                      <span className="text-sm font-medium">{c.name}</span>
+                      <GenderCounts counts={genderCountsFor(genderMap, c.id)} compact />
+                    </span>
+                    {c.id === activeClassId && <span className="text-xs font-bold shrink-0">Dipilih ✓</span>}
                   </button>
                 ))}
               </div>
@@ -1410,6 +1587,7 @@ function SiswaTab({ profile, classes, activeClassId, setActiveClassId, students,
         <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
           <div className="text-sm font-bold" style={{ color: INK }}>Siswa {activeName ? `— Kelas ${activeName}` : ""}</div>
         </div>
+        {activeClassId && <div className="mb-3"><GenderCounts counts={countGender(students)} /></div>}
         {activeClassId ? (
           <>
             <div className="text-xs mb-3" style={{ color: MUTED }}>

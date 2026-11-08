@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { supabase, createTempAuthClient } from "./supabaseClient.js";
 import {
-  NAVY, NAVY2, ORANGE, BG, INK, MUTED, ATT_STATUSES, todayStr, PageHeader, Card, EmptyState, Toast, exportToExcel, fetchAllRows, ClassPicker, TingkatFilter, classTingkatKey,
+  NAVY, NAVY2, ORANGE, BG, INK, MUTED, ATT_STATUSES, todayStr, PageHeader, Card, EmptyState, Toast, exportToExcel, fetchAllRows, ClassPicker, TingkatFilter, classTingkatKey, GenderCounts, useGenderCounts, genderCountsFor,
 } from "./shared.jsx";
 import { CalendarCheck, PiggyBank, LogOut, Repeat, ListChecks, Plus, Trash2, FileDown, UserPlus, ArrowUpCircle, Archive, Users, Pencil } from "lucide-react";
 import TambahSiswaPanel from "./TambahSiswaPanel.jsx";
@@ -39,6 +39,7 @@ function KelolaKelasTab({ profile, classes, notify, reloadClasses }) {
   const [newYearLabel, setNewYearLabel] = useState("");
   const [promoting, setPromoting] = useState(false);
   const [showArchive, setShowArchive] = useState(false);
+  const genderMap = useGenderCounts(classes.length);
   const [tk, setTk] = useState("all");
   const [editingId, setEditingId] = useState(null);
   const [editName, setEditName] = useState("");
@@ -221,7 +222,10 @@ function KelolaKelasTab({ profile, classes, notify, reloadClasses }) {
             {shownClasses.map((c) => (
               <div key={c.id} className="py-2.5">
                 <div className="flex items-center justify-between gap-2 flex-wrap">
-                  <span className="text-sm font-medium" style={{ color: INK }}>{c.name}</span>
+                  <span className="flex flex-col gap-1">
+                    <span className="text-sm font-medium" style={{ color: INK }}>{c.name}</span>
+                    <GenderCounts counts={genderCountsFor(genderMap, c.id)} compact />
+                  </span>
                   <div className="flex items-center gap-2 flex-wrap">
                     {c.owner_id ? (
                       <span className="text-xs font-semibold px-2 py-1 rounded-md" style={{ background: "#EAF7EF", color: "#2E8B57" }}>
@@ -385,7 +389,7 @@ function SiswaKaprogTab({ classes, notify }) {
 
   return (
     <div>
-      <PageHeader eyebrow="Kepala Program" title="Tambah Siswa" right={<ClassPicker classes={classes} value={classId} onChange={setClassId} />} />
+      <PageHeader eyebrow="Kepala Program" title="Tambah Siswa" right={<ClassPicker classes={classes} value={classId} onChange={setClassId} students={students} />} />
       <Card>
         <div className="text-sm font-bold mb-1" style={{ color: INK }}>Siswa — Kelas {classes.find((c) => c.id === classId)?.name}</div>
         <div className="text-xs mb-3" style={{ color: MUTED }}>

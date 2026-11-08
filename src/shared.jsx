@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import * as XLSX from "xlsx";
+import { supabase } from "./supabaseClient.js";
 import { subscribePending, initAutoSync, syncNow } from "./offlineSync.js";
 
 // ---------- Brand tokens ----------
@@ -202,16 +203,80 @@ export function classTingkatKey(c) {
 }
 const tingkatLabel = (k) => (k === "lain" ? "Lainnya" : `Kelas ${k}`);
 
+// ---- Jumlah siswa laki-laki / perempuan ----
+export function countGender(list) {
+  let L = 0, P = 0, none = 0;
+  (list || []).forEach((s) => {
+    if (s.gender === "L") L += 1;
+    else if (s.gender === "P") P += 1;
+    else none += 1;
+  });
+  return { total: (list || []).length, L, P, none };
+}
+
+// Ringkasan "35 siswa · Laki-laki 15 · Perempuan 20". compact = "L 15 · P 20".
+export function GenderCounts({ counts, compact = false }) {
+  if (!counts) return null;
+  const pill = "text-xs font-semibold px-2 py-0.5 rounded-md";
+  return (
+    <span className="inline-flex items-center gap-1.5 flex-wrap">
+      <span className={pill} style={{ background: "#F4F5F7", color: INK }}>{counts.total} siswa</span>
+      <span className={pill} style={{ background: "#EAF1FB", color: "#2B5FB8" }}>{compact ? "L" : "Laki-laki"} {counts.L}</span>
+      <span className={pill} style={{ background: "#FBEAF2", color: "#C23B78" }}>{compact ? "P" : "Perempuan"} {counts.P}</span>
+      {counts.none > 0 && <span className={pill} style={{ background: "#FFF4EE", color: "#9A4A22" }}>{counts.none} belum diisi</span>}
+    </span>
+  );
+}
+
+// Jumlah L/P untuk SEMUA kelas sekaligus (satu pengambilan data).
+// Hasilnya null selama masih memuat, lalu { [class_id]: {total,L,P,none} }.
+export function useGenderCounts(refreshKey) {
+  const [map, setMap] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    fetchAllRows(() => supabase.from("students").select("class_id,gender").order("id")).then(({ data }) => {
+      if (!alive || !data) return;
+      const m = {};
+      data.forEach((s) => {
+        if (!m[s.class_id]) m[s.class_id] = { total: 0, L: 0, P: 0, none: 0 };
+        const c = m[s.class_id];
+        c.total += 1;
+        if (s.gender === "L") c.L += 1;
+        else if (s.gender === "P") c.P += 1;
+        else c.none += 1;
+      });
+      setMap(m);
+    });
+    return () => { alive = false; };
+  }, [refreshKey]);
+  return map;
+}
+export const genderCountsFor = (map, classId) => (map ? (map[classId] || { total: 0, L: 0, P: 0, none: 0 }) : null);
+
 // Pemilih kelas dua langkah: pilih tingkat (10/11/12) dulu, baru kelasnya
 // muncul sesuai tingkat itu.
-export function ClassPicker({ classes, value, onChange }) {
+export function ClassPicker({ classes, value, onChange, students }) {
   const cur = classes.find((c) => c.id === value);
+  // Jumlah L/P kelas terpilih. Kalau halaman sudah punya daftar siswa
+  // (prop students), pakai itu supaya langsung ikut berubah saat ada
+  // siswa baru; kalau tidak, ambil sendiri (hanya satu kelas, ringan).
+  const [fetchedCounts, setFetchedCounts] = useState(null);
+  useEffect(() => {
+    if (students || !value) { setFetchedCounts(null); return undefined; }
+    let alive = true;
+    supabase.from("students").select("gender").eq("class_id", value).then(({ data }) => {
+      if (alive && data) setFetchedCounts(countGender(data));
+    });
+    return () => { alive = false; };
+  }, [value, students]);
+  const counts = students ? countGender(students) : fetchedCounts;
   const keys = ["10", "11", "12", ...(classes.some((c) => classTingkatKey(c) === "lain") ? ["lain"] : [])];
   const selKey = cur ? classTingkatKey(cur) : (keys.find((k) => classes.some((c) => classTingkatKey(c) === k)) || "10");
   const inTingkat = classes.filter((c) => classTingkatKey(c) === selKey);
   const selectCls = "text-sm font-semibold px-4 py-2.5 rounded-lg border-0 cursor-pointer";
   const selectStyle = { background: "white", color: INK, boxShadow: "0 1px 2px rgba(22,35,63,0.12)" };
   return (
+    <div className="flex flex-col gap-1.5 items-start md:items-end">
     <div className="flex items-center gap-2 flex-wrap">
       <select
         value={selKey}
@@ -234,6 +299,8 @@ export function ClassPicker({ classes, value, onChange }) {
           <option key={c.id} value={c.id}>Kelas {c.name}</option>
         ))}
       </select>
+    </div>
+    {cur && counts && <GenderCounts counts={counts} />}
     </div>
   );
 }

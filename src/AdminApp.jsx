@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { supabase } from "./supabaseClient.js";
 import {
   NAVY, NAVY2, ORANGE, BG, INK, MUTED, GREEN, RED, AMBER, todayStr,
-  PageHeader, Card, EmptyState, Toast, fetchAllRows, ClassPicker, TingkatFilter, classTingkatKey,
+  PageHeader, Card, EmptyState, Toast, fetchAllRows, ClassPicker, TingkatFilter, classTingkatKey, GenderCounts, useGenderCounts, genderCountsFor,
 } from "./shared.jsx";
 import TambahSiswaPanel from "./TambahSiswaPanel.jsx";
 import { AbsensiRekapTab, TabunganRekapTab } from "./KepalaProgramApp.jsx";
@@ -50,7 +50,7 @@ function RingkasanTab({ jurusan, classes }) {
     (async () => {
       const [prof, studs, att] = await Promise.all([
         fetchAllRows(() => supabase.from("profiles").select("id,name,approved").order("id")),
-        fetchAllRows(() => supabase.from("students").select("id,class_id").order("id")),
+        fetchAllRows(() => supabase.from("students").select("id,class_id,gender").order("id")),
         fetchAllRows(() => supabase.from("homeroom_attendance").select("student_id,status").eq("date", todayStr()).order("student_id")),
       ]);
       setData({ prof: prof.data || [], studs: studs.data || [], att: att.data || [] });
@@ -66,8 +66,15 @@ function RingkasanTab({ jurusan, classes }) {
     const classOfStudent = {};
     data.studs.forEach((s) => { classOfStudent[s.id] = s.class_id; });
     const perClass = {};
-    active.forEach((c) => { perClass[c.id] = { siswa: 0, filled: 0, counts: { Hadir: 0, Izin: 0, Sakit: 0, Alpa: 0 } }; });
-    data.studs.forEach((s) => { if (perClass[s.class_id]) perClass[s.class_id].siswa += 1; });
+    active.forEach((c) => { perClass[c.id] = { siswa: 0, L: 0, P: 0, none: 0, filled: 0, counts: { Hadir: 0, Izin: 0, Sakit: 0, Alpa: 0 } }; });
+    data.studs.forEach((s) => {
+      const pc = perClass[s.class_id];
+      if (!pc) return;
+      pc.siswa += 1;
+      if (s.gender === "L") pc.L += 1;
+      else if (s.gender === "P") pc.P += 1;
+      else pc.none += 1;
+    });
     data.att.forEach((a) => {
       const cid = classOfStudent[a.student_id];
       if (perClass[cid]) {
@@ -76,9 +83,11 @@ function RingkasanTab({ jurusan, classes }) {
       }
     });
     const totalSiswa = Object.values(perClass).reduce((sum, p) => sum + p.siswa, 0);
+    const totalL = Object.values(perClass).reduce((sum, p) => sum + p.L, 0);
+    const totalP = Object.values(perClass).reduce((sum, p) => sum + p.P, 0);
     const kelasBelumIsi = active.filter((c) => perClass[c.id].siswa > 0 && perClass[c.id].filled === 0).length;
     return {
-      profMap, perClass, totalSiswa, kelasBelumIsi,
+      profMap, perClass, totalSiswa, totalL, totalP, kelasBelumIsi,
       totalAkun: data.prof.length,
       pending: data.prof.filter((p) => !p.approved).length,
     };
@@ -92,13 +101,15 @@ function RingkasanTab({ jurusan, classes }) {
     { label: "Jurusan", value: jurusan.length },
     { label: "Kelas aktif", value: active.length },
     { label: "Siswa", value: view.totalSiswa },
+    { label: "Siswa laki-laki", value: view.totalL },
+    { label: "Siswa perempuan", value: view.totalP },
     { label: "Kelas belum absen hari ini", value: view.kelasBelumIsi, warn: view.kelasBelumIsi > 0 },
   ];
 
   return (
     <div>
       <PageHeader eyebrow="Admin" title="Pantau Hari Ini" />
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-5">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
         {stats.map((s) => (
           <Card key={s.label}>
             <div className="text-2xl font-bold" style={{ color: s.warn ? AMBER : INK }}>{s.value}</div>
@@ -119,7 +130,8 @@ function RingkasanTab({ jurusan, classes }) {
                   <div key={c.id} className="py-2.5 flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
                     <div className="min-w-0">
                       <div className="text-sm font-semibold" style={{ color: INK }}>{c.name}</div>
-                      <div className="text-xs" style={{ color: c.owner_id ? MUTED : AMBER }}>{wali} · {p.siswa} siswa</div>
+                      <div className="text-xs" style={{ color: c.owner_id ? MUTED : AMBER }}>{wali}</div>
+                      <div className="mt-1"><GenderCounts counts={{ total: p.siswa, L: p.L, P: p.P, none: p.none }} compact /></div>
                     </div>
                     <div className="text-xs font-semibold" style={{ color: p.filled === 0 ? AMBER : MUTED }}>
                       {p.filled === 0
@@ -229,6 +241,7 @@ function JurusanKelasTab({ jurusan, classes, notify, reload }) {
   const [newClassName, setNewClassName] = useState("");
   const [newClassJurusan, setNewClassJurusan] = useState("");
   const [busy, setBusy] = useState(false);
+  const genderMap = useGenderCounts(classes.length);
   const [tk, setTk] = useState("all");
   const [editingId, setEditingId] = useState(null);
   const [editName, setEditName] = useState("");
@@ -331,7 +344,10 @@ function JurusanKelasTab({ jurusan, classes, notify, reload }) {
               {list.map((c) => (
                 <div key={c.id} className="py-2">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-sm font-medium" style={{ color: INK }}>{c.name}</span>
+                    <span className="flex flex-col gap-1">
+                      <span className="text-sm font-medium" style={{ color: INK }}>{c.name}</span>
+                      <GenderCounts counts={genderCountsFor(genderMap, c.id)} compact />
+                    </span>
                     <div className="flex items-center gap-2">
                       {c.archived && <span className="text-xs font-semibold px-2 py-0.5 rounded-md" style={{ background: BG, color: MUTED }}>Arsip</span>}
                       <button onClick={() => { setEditingId(c.id); setEditName(c.name); }} title="Ubah nama kelas" className="w-8 h-8 rounded-md flex items-center justify-center" style={{ background: "#EEF0F3" }}><Pencil size={13} color={MUTED} /></button>
@@ -391,7 +407,7 @@ function SiswaAdminTab({ jurusan, classes, notify }) {
 
   return (
     <div>
-      <PageHeader eyebrow="Admin" title="Tambah Siswa" right={<ClassPicker classes={active} value={classId} onChange={setClassId} />} />
+      <PageHeader eyebrow="Admin" title="Tambah Siswa" right={<ClassPicker classes={active} value={classId} onChange={setClassId} students={students} />} />
       <Card>
         <div className="text-sm font-bold mb-1" style={{ color: INK }}>Siswa — Kelas {active.find((c) => c.id === classId)?.name}</div>
         <div className="text-xs mb-3" style={{ color: MUTED }}>
