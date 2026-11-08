@@ -344,6 +344,61 @@ function PoinTab({ profile, classes, activeClassId, setActiveClassId, students, 
 // ================= NILAI PRAKTEK HARIAN =================
 // ================= TES KEBUGARAN (TKJI) =================
 // ================= TES KEBUGARAN — wrapper pemilih mode =================
+// Pilih skala nilai (angka untuk nilai 0 dan nilai 100) sesuai jenis
+// kelamin siswa. Kalau indikator tidak dibedakan, semua siswa pakai satu
+// skala. Kalau dibedakan tapi jenis kelamin siswa belum diisi -> null.
+function pickScale({ split, worst, best, worstL, bestL, worstP, bestP }, gender) {
+  if (!split) return { w: worst, b: best, label: "" };
+  if (gender === "L") return { w: worstL, b: bestL, label: "laki-laki" };
+  if (gender === "P") return { w: worstP, b: bestP, label: "perempuan" };
+  return null;
+}
+
+// State yang diingat di browser (tetap ada walau halaman ditutup).
+function usePersisted(key, initial) {
+  const [v, setV] = useState(() => {
+    try { const x = localStorage.getItem(key); return x === null ? initial : x; } catch { return initial; }
+  });
+  useEffect(() => { try { localStorage.setItem(key, v); } catch { /* abaikan */ } }, [key, v]);
+  return [v, setV];
+}
+
+// Isian skala nilai: satu skala untuk semua, atau dibedakan laki-laki &
+// perempuan (standar keduanya biasanya berbeda).
+function GenderScaleFields({ split, onSplit, scale, onChange, label0, label100, ph0, ph100 }) {
+  const lbl = (t) => <label className="text-xs font-semibold block mb-1" style={{ color: MUTED }}>{t}</label>;
+  const input = (k, ph) => (
+    <input type="number" value={scale[k]} onChange={(e) => onChange(k, e.target.value)} placeholder={ph}
+      className="text-sm px-3 py-2 rounded-lg w-full" style={{ background: BG, color: INK }} />
+  );
+  return (
+    <div>
+      <label className="flex items-center gap-2 text-xs font-semibold mb-3 cursor-pointer" style={{ color: INK }}>
+        <input type="checkbox" checked={split} onChange={(e) => onSplit(e.target.checked)} />
+        Bedakan indikator nilai laki-laki &amp; perempuan
+      </label>
+      {!split ? (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>{lbl(label0)}{input("worst", ph0)}</div>
+          <div>{lbl(label100)}{input("best", ph100)}</div>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-3">
+          {[["L", "Laki-laki", "#2B5FB8", "#EAF1FB"], ["P", "Perempuan", "#C23B78", "#FBEAF2"]].map(([g, name, color, bg]) => (
+            <div key={g} className="rounded-lg p-3" style={{ background: bg }}>
+              <div className="text-xs font-bold mb-2" style={{ color }}>{name}</div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>{lbl(label0)}{input("worst" + g, ph0)}</div>
+                <div>{lbl(label100)}{input("best" + g, ph100)}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Menyimpan hasil satu tes ke tujuan yang dipilih di menu Tes Kebugaran:
 //  - "harian": jadi satu baris Nilai Harian (seperti biasa)
 //  - "ujian" : jadi nilai TES PRAKTIK untuk Ujian Akhir. Satu siswa bisa
@@ -595,6 +650,19 @@ function BeepTestMode({ profile, students, notify, dest }) {
     try { return localStorage.getItem("r3edu_beep_best") || "65"; } catch { return "65"; }
   });
 
+  const [splitRaw, setSplitRaw] = usePersisted("r3edu_beep_split", "0");
+  const [worstL, setWorstL] = usePersisted("r3edu_beep_worst_l", "");
+  const [bestL, setBestL] = usePersisted("r3edu_beep_best_l", "");
+  const [worstP, setWorstP] = usePersisted("r3edu_beep_worst_p", "");
+  const [bestP, setBestP] = usePersisted("r3edu_beep_best_p", "");
+  const split = splitRaw === "1";
+  const scaleObj = { worst, best, worstL, bestL, worstP, bestP };
+  const setScaleKey = (k, v) => ({ worst: setWorst, best: setBest, worstL: setWorstL, bestL: setBestL, worstP: setWorstP, bestP: setBestP })[k](v);
+  const toggleSplit = (on) => {
+    setSplitRaw(on ? "1" : "0");
+    if (on && !worstL && !bestL && !worstP && !bestP) { setWorstL(worst); setBestL(best); setWorstP(worst); setBestP(best); }
+  };
+
   useEffect(() => { setStudentId(students[0]?.id || ""); }, [students]);
   useEffect(() => { try { localStorage.setItem("r3edu_beep_worst", worst); } catch { /* abaikan */ } }, [worst]);
   useEffect(() => { try { localStorage.setItem("r3edu_beep_best", best); } catch { /* abaikan */ } }, [best]);
@@ -603,12 +671,13 @@ function BeepTestMode({ profile, students, notify, dest }) {
   const gender = student?.gender || "L";
   const vo2 = beepVO2max(level, shuttle, age);
   const category = classifyVO2max(vo2, gender);
-  const scaledScore = vo2 != null ? customScore(vo2, worst, best) : null;
+  const sc = pickScale({ split, ...scaleObj }, student?.gender);
+  const scaledScore = vo2 != null && sc ? customScore(vo2, sc.w, sc.b) : null;
 
   const send = async () => {
     if (!studentId || vo2 == null || scaledScore == null) return;
     setSending(true);
-    const note = `Beep Test/MFT: Level ${level} Shuttle ${shuttle}, usia ${age} th. Estimasi VO2max ${vo2} ml/kg/menit — Kategori: ${category}. Skala nilai: VO2max ${worst}=0, ${best}=100. (Estimasi rumus umum, bukan standar baku — mohon dicek ulang.)`;
+    const note = `Beep Test/MFT: Level ${level} Shuttle ${shuttle}, usia ${age} th. Estimasi VO2max ${vo2} ml/kg/menit — Kategori: ${category}. Skala nilai${sc.label ? ` (${sc.label})` : ""}: VO2max ${sc.w}=0, ${sc.b}=100. (Estimasi rumus umum, bukan standar baku — mohon dicek ulang.)`;
     const { error, offline } = await saveTestResult({ dest, profile, studentId, testName: "Beep Test", score: scaledScore, note });
     setSending(false);
     if (error) return notify("Gagal: " + error.message);
@@ -625,20 +694,10 @@ function BeepTestMode({ profile, students, notify, dest }) {
       </div>
       <Card className="mb-5">
         <div className="text-sm font-bold mb-3" style={{ color: INK }}>Atur Skala Nilai</div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div>
-            <label className="text-xs font-semibold block mb-1" style={{ color: MUTED }}>VO2max untuk Nilai 0</label>
-            <input type="number" value={worst} onChange={(e) => setWorst(e.target.value)}
-              className="text-sm px-3 py-2 rounded-lg w-full" style={{ background: BG, color: INK }} />
-          </div>
-          <div>
-            <label className="text-xs font-semibold block mb-1" style={{ color: MUTED }}>VO2max untuk Nilai 100</label>
-            <input type="number" value={best} onChange={(e) => setBest(e.target.value)}
-              className="text-sm px-3 py-2 rounded-lg w-full" style={{ background: BG, color: INK }} />
-          </div>
-        </div>
+        <GenderScaleFields split={split} onSplit={toggleSplit} scale={scaleObj} onChange={setScaleKey}
+          label0="VO2max untuk Nilai 0" label100="VO2max untuk Nilai 100" ph0="mis. 20" ph100="mis. 65" />
         <div className="text-xs mt-2" style={{ color: MUTED }}>
-          Angka ini diingat otomatis untuk pemakaian berikutnya. Boleh dibedakan per kelas/gender kalau perlu, tinggal diubah sebelum isi hasil.
+          Angka ini diingat otomatis untuk pemakaian berikutnya. Centang pilihan di atas kalau skala laki-laki dan perempuan berbeda.
         </div>
       </Card>
       {students.length === 0 ? (
@@ -658,6 +717,14 @@ function BeepTestMode({ profile, students, notify, dest }) {
           </Card>
           <Card className="flex-1">
             <div className="text-sm font-bold mb-4" style={{ color: INK }}>{student?.name || "—"}</div>
+            {split && student && !student.gender && (
+              <div className="text-xs mb-3 px-3 py-2 rounded-lg" style={{ background: "#FFF4EE", color: "#9A4A22" }}>
+                Jenis kelamin siswa ini belum diisi (L/P), jadi nilai belum bisa dihitung dengan skala laki-laki/perempuan. Lengkapi dulu jenis kelaminnya.
+              </div>
+            )}
+            {split && sc && (
+              <div className="text-xs mb-3" style={{ color: MUTED }}>Memakai skala {sc.label}: VO2max {sc.w} = nilai 0, {sc.b} = nilai 100.</div>
+            )}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div>
                 <label className="text-xs font-semibold block mb-1" style={{ color: MUTED }}>Level Tercapai</label>
@@ -708,7 +775,18 @@ function TesBebasMode({ profile, students, notify, dest }) {
   const [unit, setUnit] = useState("");
   const [worst, setWorst] = useState("");
   const [best, setBest] = useState("");
+  const [split, setSplit] = useState(false);
+  const [worstL, setWorstL] = useState("");
+  const [bestL, setBestL] = useState("");
+  const [worstP, setWorstP] = useState("");
+  const [bestP, setBestP] = useState("");
   const [draftLoaded, setDraftLoaded] = useState(false);
+  const scaleObj = { worst, best, worstL, bestL, worstP, bestP };
+  const setScaleKey = (k, v) => ({ worst: setWorst, best: setBest, worstL: setWorstL, bestL: setBestL, worstP: setWorstP, bestP: setBestP })[k](v);
+  const toggleSplit = (on) => {
+    setSplit(on);
+    if (on && !worstL && !bestL && !worstP && !bestP) { setWorstL(worst); setBestL(best); setWorstP(worst); setBestP(best); }
+  };
   const [studentId, setStudentId] = useState("");
   const [raw, setRaw] = useState("");
   const [manualScore, setManualScore] = useState("");
@@ -727,6 +805,9 @@ function TesBebasMode({ profile, students, notify, dest }) {
         setUnit(d.unit || "");
         setWorst(d.worst ?? "");
         setBest(d.best ?? "");
+        setSplit(!!d.split);
+        setWorstL(d.worstL ?? ""); setBestL(d.bestL ?? "");
+        setWorstP(d.worstP ?? ""); setBestP(d.bestP ?? "");
       }
     } catch { /* abaikan */ }
     setDraftLoaded(true);
@@ -735,8 +816,8 @@ function TesBebasMode({ profile, students, notify, dest }) {
 
   useEffect(() => {
     if (!draftLoaded) return;
-    try { localStorage.setItem(draftKey, JSON.stringify({ testName, unit, worst, best })); } catch { /* abaikan */ }
-  }, [draftKey, testName, unit, worst, best, draftLoaded]);
+    try { localStorage.setItem(draftKey, JSON.stringify({ testName, unit, worst, best, split, worstL, bestL, worstP, bestP })); } catch { /* abaikan */ }
+  }, [draftKey, testName, unit, worst, best, split, worstL, bestL, worstP, bestP, draftLoaded]);
 
   useEffect(() => { setStudentId(students[0]?.id || ""); }, [students]);
 
@@ -773,25 +854,27 @@ function TesBebasMode({ profile, students, notify, dest }) {
   }, [studentId, testName]);
 
   const student = students.find((s) => s.id === studentId);
-  const autoScore = customScore(raw, worst, best);
+  const sc = pickScale({ split, ...scaleObj }, student?.gender);
+  const autoScore = sc ? customScore(raw, sc.w, sc.b) : null;
   const finalScore = manualScore !== "" ? Number(manualScore) : autoScore;
 
   const savePreset = () => {
     if (!testName.trim()) return;
-    const next = [{ name: testName.trim(), unit: unit.trim(), worst, best }, ...presets.filter((p) => p.name !== testName.trim())].slice(0, 10);
+    const next = [{ name: testName.trim(), unit: unit.trim(), worst, best, split, worstL, bestL, worstP, bestP }, ...presets.filter((p) => p.name !== testName.trim())].slice(0, 10);
     setPresets(next);
     try { localStorage.setItem("r3edu_tes_bebas_presets", JSON.stringify(next)); } catch { /* abaikan */ }
   };
 
   const loadPreset = (p) => {
     setTestName(p.name); setUnit(p.unit); setWorst(p.worst); setBest(p.best);
+    setSplit(!!p.split); setWorstL(p.worstL ?? ""); setBestL(p.bestL ?? ""); setWorstP(p.worstP ?? ""); setBestP(p.bestP ?? "");
   };
 
   const send = async () => {
     if (!studentId || !testName.trim() || finalScore == null) return;
     setSending(true);
     savePreset();
-    const note = `Tes Bebas — ${testName.trim()}: ${raw}${unit ? " " + unit : ""}${manualScore !== "" ? " (nilai diisi manual)" : ` (nilai 0 = ${worst}, nilai 100 = ${best})`}.`;
+    const note = `Tes Bebas — ${testName.trim()}: ${raw}${unit ? " " + unit : ""}${manualScore !== "" ? " (nilai diisi manual)" : ` ${sc ? ` (nilai 0 = ${sc.w}, nilai 100 = ${sc.b}${sc.label ? `, skala ${sc.label}` : ""})` : ""}`}.`;
     const scoreVal = Math.max(0, Math.min(100, finalScore));
     const existing = currentTestEntries.find((e) => e.student_id === studentId);
     let res;
@@ -839,21 +922,15 @@ function TesBebasMode({ profile, students, notify, dest }) {
             <input value={unit} onChange={(e) => setUnit(e.target.value)} placeholder="mis. detik"
               className="text-sm px-3 py-2 rounded-lg w-full" style={{ background: BG, color: INK }} />
           </div>
-          <div />
-          <div>
-            <label className="text-xs font-semibold block mb-1" style={{ color: MUTED }}>Nilai 0 di angka</label>
-            <input type="number" value={worst} onChange={(e) => setWorst(e.target.value)} placeholder="mis. 10"
-              className="text-sm px-3 py-2 rounded-lg w-full" style={{ background: BG, color: INK }} />
-          </div>
-          <div>
-            <label className="text-xs font-semibold block mb-1" style={{ color: MUTED }}>Nilai 100 di angka</label>
-            <input type="number" value={best} onChange={(e) => setBest(e.target.value)} placeholder="mis. 90"
-              className="text-sm px-3 py-2 rounded-lg w-full" style={{ background: BG, color: INK }} />
+          <div className="sm:col-span-4">
+            <GenderScaleFields split={split} onSplit={toggleSplit} scale={scaleObj} onChange={setScaleKey}
+              label0="Nilai 0 di angka" label100="Nilai 100 di angka" ph0="mis. 10" ph100="mis. 90" />
           </div>
         </div>
         <div className="text-xs mt-2" style={{ color: MUTED }}>
           Tidak wajib diisi kalau mau isi nilai manual saja. Arah (makin besar/makin kecil makin baik) otomatis
-          mengikuti mana yang lebih besar di antara "Nilai 0" dan "Nilai 100".
+          mengikuti mana yang lebih besar di antara "Nilai 0" dan "Nilai 100". Kalau standar laki-laki dan perempuan berbeda, centang
+          "Bedakan indikator" lalu isi skala masing-masing — nilai otomatis mengikuti jenis kelamin siswa.
         </div>
       </Card>
 
@@ -877,6 +954,14 @@ function TesBebasMode({ profile, students, notify, dest }) {
           </Card>
           <Card className="flex-1">
             <div className="text-sm font-bold mb-4" style={{ color: INK }}>2. Isi Hasil — {student?.name || "—"}</div>
+            {split && student && !student.gender && (
+              <div className="text-xs mb-3 px-3 py-2 rounded-lg" style={{ background: "#FFF4EE", color: "#9A4A22" }}>
+                Jenis kelamin siswa ini belum diisi (L/P), jadi nilai otomatis belum bisa dihitung. Isi nilai manual, atau lengkapi jenis kelaminnya dulu.
+              </div>
+            )}
+            {split && sc && (
+              <div className="text-xs mb-3" style={{ color: MUTED }}>Memakai skala {sc.label}: nilai 0 = {sc.w || "…"}, nilai 100 = {sc.b || "…"}.</div>
+            )}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="text-xs font-semibold block mb-1" style={{ color: MUTED }}>Hasil Mentah {unit && `(${unit})`}</label>
