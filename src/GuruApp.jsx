@@ -4,7 +4,7 @@ import {
   NAVY, NAVY2, ORANGE, BG, INK, MUTED, GREEN, RED,
   ATT_STATUSES, POINT_CATEGORIES, todayStr, gradeLetter,
   computeFinalScore, exportToExcel, downloadStudentTemplate, parseStudentsExcel,
-  PageHeader, Card, EmptyState, ClassPicker, Toast, OfflineBanner, useOfflineStatus, fetchAllRows, TingkatFilter, classTingkatKey, GenderCounts, countGender, useGenderCounts, genderCountsFor,
+  PageHeader, Card, EmptyState, ClassPicker, Toast, OfflineBanner, useOfflineStatus, fetchAllRows, TingkatFilter, classTingkatKey, GenderCounts, countGender, useGenderCounts, genderCountsFor, GenderSelect, setStudentGender,
 } from "./shared.jsx";
 import { offlineWrite, genId } from "./offlineSync.js";
 import {
@@ -1617,7 +1617,16 @@ function SiswaTab({ profile, classes, activeClassId, setActiveClassId, students,
   }, []);
 
   // Pilih tingkat dulu (10/11/12); daftar kelas di bawahnya menyesuaikan.
-  const genderMap = useGenderCounts(students.length);
+  const genderMap = useGenderCounts(students.map((x) => x.gender || "-").join(""));
+  const [genderBusy, setGenderBusy] = useState(null);
+  const changeGender = async (st, g) => {
+    setGenderBusy(st.id);
+    const { error } = await setStudentGender(st.id, g);
+    setGenderBusy(null);
+    if (error) return notify("Gagal mengubah jenis kelamin: " + error.message);
+    notify(`Jenis kelamin ${st.name} diubah menjadi ${g === "L" ? "Laki-laki" : "Perempuan"}.`);
+    reloadStudents?.();
+  };
   const [tkSel, setTkSel] = useState(null);
   const activeCls = classes.find((c) => c.id === activeClassId);
   const tk = tkSel ?? (activeCls ? classTingkatKey(activeCls) : "10");
@@ -1690,10 +1699,7 @@ function SiswaTab({ profile, classes, activeClassId, setActiveClassId, students,
                 <span className="text-sm" style={{ color: INK }}>
                   <span style={{ color: MUTED, fontWeight: 600 }}>{i + 1}.</span> {s.name}
                 </span>
-                <span className="text-xs font-bold px-2 py-1 rounded-md"
-                  style={{ background: s.gender === "P" ? "#FBEAF2" : "#EAF1FB", color: s.gender === "P" ? "#C23B78" : "#2B5FB8" }}>
-                  {s.gender || "?"}
-                </span>
+                <GenderSelect value={s.gender} busy={genderBusy === s.id} onChange={(g) => changeGender(s, g)} />
               </div>
             ))}
           </div>

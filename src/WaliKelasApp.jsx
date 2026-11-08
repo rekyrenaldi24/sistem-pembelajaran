@@ -3,7 +3,7 @@ import { supabase, createTempAuthClient } from "./supabaseClient.js";
 import {
   NAVY, NAVY2, ORANGE, BG, INK, MUTED, GREEN, RED, AMBER,
   ATT_STATUSES, todayStr, exportToExcel, downloadStudentTemplate, parseStudentsExcel, sha256Hex,
-  PageHeader, Card, EmptyState, ClassPicker, Toast, OfflineBanner, useOfflineStatus, fetchAllRows,
+  PageHeader, Card, EmptyState, ClassPicker, Toast, OfflineBanner, useOfflineStatus, fetchAllRows, GenderSelect,
 } from "./shared.jsx";
 import { offlineWrite, genId } from "./offlineSync.js";
 import {
@@ -1101,11 +1101,14 @@ function SiswaTab({ profile, classes, activeClassId, setActiveClassId, students,
     setStudents((prev) => prev.filter((s) => s.id !== id));
     await offlineWrite("students", "delete", null, { match: { id } });
   };
-  const toggleGender = async (s) => {
-    const next = s.gender === "L" ? "P" : "L";
-    setStudents((prev) => prev.map((x) => x.id === s.id ? { ...x, gender: next } : x));
-    const { error } = await offlineWrite("students", "update", { gender: next }, { match: { id: s.id } });
-    if (error) notify("Gagal: " + error.message);
+  const changeStudentGender = async (s, g) => {
+    if (s.gender === g) return;
+    setStudents((prev) => prev.map((x) => x.id === s.id ? { ...x, gender: g } : x));
+    const { error } = await offlineWrite("students", "update", { gender: g }, { match: { id: s.id } });
+    if (error) {
+      setStudents((prev) => prev.map((x) => x.id === s.id ? { ...x, gender: s.gender } : x));
+      notify("Gagal mengubah jenis kelamin: " + error.message);
+    }
   };
 
   const [importing, setImporting] = useState(false);
@@ -1179,11 +1182,7 @@ function SiswaTab({ profile, classes, activeClassId, setActiveClassId, students,
               <div key={s.id} className="flex items-center justify-between py-2.5">
                 <span className="text-sm" style={{ color: INK }}>{s.name}</span>
                 <div className="flex items-center gap-2">
-                  <button onClick={() => toggleGender(s)} className="text-xs font-bold px-2 py-1 rounded-md"
-                    style={{ background: s.gender === "P" ? "#FBEAF2" : "#EAF1FB", color: s.gender === "P" ? "#C23B78" : "#2B5FB8" }}
-                    title="Klik untuk ubah">
-                    {s.gender || "?"}
-                  </button>
+                  <GenderSelect value={s.gender} onChange={(g) => changeStudentGender(s, g)} />
                   <button onClick={() => removeStudent(s.id)} className="w-8 h-8 rounded-md flex items-center justify-center" style={{ background: "#FBEAEC" }}><Trash2 size={13} color={RED} /></button>
                 </div>
               </div>

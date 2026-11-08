@@ -305,6 +305,30 @@ export function ClassPicker({ classes, value, onChange, students }) {
   );
 }
 
+// Pilihan jenis kelamin yang jelas: dua tombol L | P, yang aktif berwarna.
+// Dipakai di daftar siswa untuk membetulkan salah input tanpa menghapus siswa.
+export function GenderSelect({ value, onChange, busy = false }) {
+  const opts = [["L", "#2B5FB8", "#EAF1FB"], ["P", "#C23B78", "#FBEAF2"]];
+  return (
+    <span className="inline-flex rounded-md overflow-hidden shrink-0" style={{ border: "1px solid #E7E9EE", opacity: busy ? 0.55 : 1 }} title="Ubah jenis kelamin">
+      {opts.map(([g, color, bg]) => (
+        <button key={g} type="button" disabled={busy} onClick={() => { if (value !== g) onChange(g); }}
+          className="text-xs font-bold px-2.5 py-1"
+          style={{ background: value === g ? bg : "white", color: value === g ? color : "#B7BFCC" }}>
+          {g}
+        </button>
+      ))}
+    </span>
+  );
+}
+
+// Mengubah HANYA jenis kelamin satu siswa lewat fungsi database
+// ubah_jenis_kelamin (boleh oleh wali kelas, kepala program, guru, admin).
+export async function setStudentGender(studentId, gender) {
+  const { error } = await supabase.rpc("ubah_jenis_kelamin", { p_student_id: studentId, p_gender: gender });
+  return { error };
+}
+
 // Tombol filter tingkat untuk daftar kelas (Semua / Kelas 10 / 11 / 12).
 // value: "all" | "10" | "11" | "12" | "lain"
 export function TingkatFilter({ classes, value, onChange, showAll = true }) {

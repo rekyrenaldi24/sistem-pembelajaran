@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { supabase, createTempAuthClient } from "./supabaseClient.js";
 import {
-  NAVY, NAVY2, ORANGE, BG, INK, MUTED, ATT_STATUSES, todayStr, PageHeader, Card, EmptyState, Toast, exportToExcel, fetchAllRows, ClassPicker, TingkatFilter, classTingkatKey, GenderCounts, useGenderCounts, genderCountsFor,
+  NAVY, NAVY2, ORANGE, BG, INK, MUTED, ATT_STATUSES, todayStr, PageHeader, Card, EmptyState, Toast, exportToExcel, fetchAllRows, ClassPicker, TingkatFilter, classTingkatKey, GenderCounts, useGenderCounts, genderCountsFor, GenderSelect, setStudentGender,
 } from "./shared.jsx";
 import { CalendarCheck, PiggyBank, LogOut, Repeat, ListChecks, Plus, Trash2, FileDown, UserPlus, ArrowUpCircle, Archive, Users, Pencil } from "lucide-react";
 import TambahSiswaPanel from "./TambahSiswaPanel.jsx";
@@ -378,6 +378,16 @@ function SiswaKaprogTab({ classes, notify }) {
 
   useEffect(() => { loadStudents(); }, [loadStudents]);
 
+  const [genderBusy, setGenderBusy] = useState(null);
+  const changeGender = async (st, g) => {
+    setGenderBusy(st.id);
+    const { error } = await setStudentGender(st.id, g);
+    setGenderBusy(null);
+    if (error) return notify("Gagal mengubah jenis kelamin: " + error.message);
+    notify(`Jenis kelamin ${st.name} diubah menjadi ${g === "L" ? "Laki-laki" : "Perempuan"}.`);
+    loadStudents();
+  };
+
   if (classes.length === 0) {
     return (
       <div>
@@ -401,8 +411,7 @@ function SiswaKaprogTab({ classes, notify }) {
             {students.map((s, i) => (
               <div key={s.id} className="flex items-center justify-between py-2.5">
                 <span className="text-sm" style={{ color: INK }}><span style={{ color: MUTED, fontWeight: 600 }}>{i + 1}.</span> {s.name}</span>
-                <span className="text-xs font-bold px-2 py-1 rounded-md"
-                  style={{ background: s.gender === "P" ? "#FBEAF2" : "#EAF1FB", color: s.gender === "P" ? "#C23B78" : "#2B5FB8" }}>{s.gender || "?"}</span>
+                <GenderSelect value={s.gender} busy={genderBusy === s.id} onChange={(g) => changeGender(s, g)} />
               </div>
             ))}
           </div>
