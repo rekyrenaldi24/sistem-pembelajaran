@@ -2,13 +2,13 @@ import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { supabase } from "./supabaseClient.js";
 import {
   NAVY, NAVY2, ORANGE, BG, INK, MUTED, GREEN, RED, AMBER, todayStr,
-  PageHeader, Card, EmptyState, Toast, fetchAllRows, ClassPicker, TingkatFilter, classTingkatKey, GenderCounts, useGenderCounts, genderCountsFor, GenderSelect, setStudentGender,
+  PageHeader, Card, EmptyState, Toast, fetchAllRows, ClassPicker, TingkatFilter, classTingkatKey, GenderCounts, useGenderCounts, genderCountsFor, GenderSelect, setStudentGender, inSemester,
 } from "./shared.jsx";
 import TambahSiswaPanel from "./TambahSiswaPanel.jsx";
 import { AbsensiRekapTab, TabunganRekapTab } from "./KepalaProgramApp.jsx";
 import { describeDetail, TABLE_LABELS, ACTION_LABEL, ACTION_ICON, ACTION_COLOR } from "./AuditLog.jsx";
 import {
-  LayoutDashboard, UserCheck, ListChecks, Users, CalendarCheck, PiggyBank, History, LogOut, Repeat, Plus, Pencil, Trash2,
+  LayoutDashboard, UserCheck, ListChecks, Users, CalendarCheck, PiggyBank, History, LogOut, Repeat, Plus, Pencil, Trash2, CalendarDays,
 } from "lucide-react";
 
 const NAV = [
@@ -18,6 +18,7 @@ const NAV = [
   { key: "siswa", label: "Tambah Siswa", icon: Users },
   { key: "absensi", label: "Rekap Absensi", icon: CalendarCheck },
   { key: "tabungan", label: "Rekap Tabungan", icon: PiggyBank },
+  { key: "semester", label: "Semester", icon: CalendarDays },
   { key: "aktivitas", label: "Aktivitas Terbaru", icon: History },
 ];
 
@@ -51,7 +52,7 @@ function RingkasanTab({ jurusan, classes }) {
       const [prof, studs, att] = await Promise.all([
         fetchAllRows(() => supabase.from("profiles").select("id,name,approved").order("id")),
         fetchAllRows(() => supabase.from("students").select("id,class_id,gender").order("id")),
-        fetchAllRows(() => supabase.from("homeroom_attendance").select("student_id,status").eq("date", todayStr()).order("student_id")),
+        fetchAllRows(() => inSemester(supabase.from("homeroom_attendance").select("student_id,status")).eq("date", todayStr()).order("student_id")),
       ]);
       setData({ prof: prof.data || [], studs: studs.data || [], att: att.data || [] });
     })();
@@ -461,6 +462,115 @@ function RekapPerJurusan({ jurusan, classes, kind }) {
   );
 }
 
+// ================= SEMESTER =================
+function SemesterTab({ semesters, notify, onChanged }) {
+  const active = semesters.find((x) => x.is_active);
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [editName, setEditName] = useState("");
+
+  const startNew = async () => {
+    const n = name.trim();
+    if (!n) return notify("Isi nama semester baru dulu, mis. Semester 2 2026/2027.");
+    const ok = window.confirm(
+      `Mulai "${n}"?\n\nSemester "${active?.name || "sekarang"}" menjadi ARSIP: absensi, nilai harian, ujian akhir, dan poinnya TETAP TERSIMPAN dan bisa dibuka lagi lewat pilihan Semester di bagian atas.\n\nMulai sekarang absensi, nilai harian, ujian akhir, dan poin dimulai dari nol di semester baru.\n\nTabungan, biodata, dan catatan siswa TIDAK ikut direset.`
+    );
+    if (!ok) return;
+    setBusy(true);
+    const { error } = await supabase.rpc("mulai_semester_baru", { p_name: n });
+    setBusy(false);
+    if (error) return notify("Gagal memulai semester baru: " + error.message);
+    setName("");
+    notify(`"${n}" dimulai. Semester sebelumnya menjadi arsip.`);
+    onChanged();
+  };
+
+  const activate = async (sem) => {
+    if (!window.confirm(`Jadikan "${sem.name}" sebagai semester AKTIF? Absensi dan nilai yang diinput mulai sekarang akan masuk ke semester ini.`)) return;
+    const { error } = await supabase.rpc("aktifkan_semester", { p_id: sem.id });
+    if (error) return notify("Gagal: " + error.message);
+    notify(`"${sem.name}" sekarang semester aktif.`);
+    onChanged();
+  };
+
+  const saveRename = async (sem) => {
+    const nm = editName.trim();
+    if (!nm) return notify("Nama semester wajib diisi.");
+    const { data, error } = await supabase.from("semesters").update({ name: nm }).eq("id", sem.id).select("id");
+    if (error) return notify("Gagal mengubah nama: " + error.message);
+    if (!data || data.length === 0) return notify("Nama tidak berubah. Pastikan file SQL semester sudah dijalankan.");
+    setEditingId(null);
+    notify("Nama semester diubah.");
+    onChanged();
+  };
+
+  if (semesters.length === 0) {
+    return (
+      <div>
+        <PageHeader eyebrow="Admin" title="Semester" />
+        <Card>
+          <EmptyState icon={CalendarDays} text="Fitur semester belum aktif. Jalankan file add_semester.sql di Supabase (SQL Editor), lalu muat ulang halaman ini." />
+        </Card>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <PageHeader eyebrow="Admin" title="Semester" />
+      <Card className="mb-5">
+        <div className="text-sm font-bold mb-1" style={{ color: INK }}>Semester aktif: {active?.name}</div>
+        <div className="text-xs mb-3" style={{ color: MUTED }}>
+          Absensi, nilai harian, ujian akhir, dan poin dicatat per semester. Saat semester baru dimulai, semuanya mulai dari nol, sedangkan data semester lama
+          tetap tersimpan dan bisa dibuka lagi lewat pilihan <b>Semester</b> di bagian paling atas aplikasi. Tabungan, biodata, dan catatan siswa berlanjut (tidak direset).
+        </div>
+        <div className="flex gap-2 flex-wrap">
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nama semester baru, mis. Semester 2 2026/2027"
+            className="text-sm px-3 py-2 rounded-lg flex-1 min-w-[220px]" style={{ background: BG, color: INK }} onKeyDown={(e) => e.key === "Enter" && startNew()} />
+          <button onClick={startNew} disabled={busy} className="px-3.5 py-2 rounded-lg text-sm font-semibold text-white flex items-center gap-1.5" style={{ background: ORANGE, opacity: busy ? 0.6 : 1 }}>
+            <Plus size={14} /> {busy ? "Memulai…" : "Mulai Semester Baru"}
+          </button>
+        </div>
+      </Card>
+      <Card>
+        <div className="text-sm font-bold mb-2" style={{ color: INK }}>Semua Semester</div>
+        <div className="flex flex-col divide-y" style={{ borderColor: "#EEF0F3" }}>
+          {semesters.map((sem) => (
+            <div key={sem.id} className="py-2.5">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <div>
+                  <div className="text-sm font-semibold" style={{ color: INK }}>{sem.name}</div>
+                  <div className="text-xs" style={{ color: MUTED }}>
+                    Mulai {sem.start_date ? new Date(sem.start_date).toLocaleDateString("id-ID", { dateStyle: "medium" }) : "—"}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  {sem.is_active
+                    ? <span className="text-xs font-bold px-2 py-0.5 rounded-md" style={{ background: "#E6F4EA", color: GREEN }}>Aktif</span>
+                    : <span className="text-xs font-semibold px-2 py-0.5 rounded-md" style={{ background: BG, color: MUTED }}>Arsip</span>}
+                  {!sem.is_active && (
+                    <button onClick={() => activate(sem)} className="text-xs font-bold px-3 py-1.5 rounded-md" style={{ background: BG, color: INK }}>Jadikan Aktif</button>
+                  )}
+                  <button onClick={() => { setEditingId(sem.id); setEditName(sem.name); }} title="Ubah nama" className="w-8 h-8 rounded-md flex items-center justify-center" style={{ background: "#EEF0F3" }}><Pencil size={13} color={MUTED} /></button>
+                </div>
+              </div>
+              {editingId === sem.id && (
+                <div className="mt-2 p-3 rounded-lg flex gap-2 flex-wrap" style={{ background: BG }}>
+                  <input value={editName} onChange={(e) => setEditName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && saveRename(sem)}
+                    className="text-sm px-3 py-2 rounded-lg flex-1 min-w-[180px]" style={{ background: "white", color: INK }} />
+                  <button onClick={() => saveRename(sem)} className="px-3.5 py-2 rounded-lg text-sm font-semibold text-white" style={{ background: NAVY }}>Simpan Nama</button>
+                  <button onClick={() => setEditingId(null)} className="px-3.5 py-2 rounded-lg text-sm font-semibold" style={{ background: "white", color: MUTED }}>Batal</button>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </Card>
+    </div>
+  );
+}
+
 // ================= AKTIVITAS TERBARU (semua pengguna) =================
 function AktivitasTab() {
   const [logs, setLogs] = useState(null);
@@ -518,7 +628,7 @@ function AktivitasTab() {
 }
 
 // ================= KERANGKA UTAMA =================
-export default function AdminApp({ profile, onLogout, onSwitchRole }) {
+export default function AdminApp({ profile, onLogout, onSwitchRole, semesters = [], onSemestersChanged }) {
   const [tab, setTab] = useState("ringkasan");
   const [jurusan, setJurusan] = useState([]);
   const [classes, setClasses] = useState([]);
@@ -592,6 +702,7 @@ export default function AdminApp({ profile, onLogout, onSwitchRole }) {
         {tab === "siswa" && <SiswaAdminTab jurusan={jurusan} classes={classes} notify={notify} />}
         {tab === "absensi" && <RekapPerJurusan jurusan={jurusan} classes={classes} kind="absensi" />}
         {tab === "tabungan" && <RekapPerJurusan jurusan={jurusan} classes={classes} kind="tabungan" />}
+        {tab === "semester" && <SemesterTab semesters={semesters} notify={notify} onChanged={() => onSemestersChanged?.()} />}
         {tab === "aktivitas" && <AktivitasTab />}
       </main>
       <Toast message={toast} onClose={() => setToast("")} />

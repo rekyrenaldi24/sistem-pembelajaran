@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { supabase, createTempAuthClient } from "./supabaseClient.js";
 import {
-  NAVY, NAVY2, ORANGE, BG, INK, MUTED, ATT_STATUSES, todayStr, PageHeader, Card, EmptyState, Toast, exportToExcel, fetchAllRows, ClassPicker, TingkatFilter, classTingkatKey, GenderCounts, useGenderCounts, genderCountsFor, GenderSelect, setStudentGender,
+  NAVY, NAVY2, ORANGE, BG, INK, MUTED, ATT_STATUSES, todayStr, PageHeader, Card, EmptyState, Toast, exportToExcel, fetchAllRows, ClassPicker, TingkatFilter, classTingkatKey, GenderCounts, useGenderCounts, genderCountsFor, GenderSelect, setStudentGender, inSemester,
 } from "./shared.jsx";
 import { CalendarCheck, PiggyBank, LogOut, Repeat, ListChecks, Plus, Trash2, FileDown, UserPlus, ArrowUpCircle, Archive, Users, Pencil } from "lucide-react";
 import TambahSiswaPanel from "./TambahSiswaPanel.jsx";
@@ -437,7 +437,7 @@ export function AbsensiRekapTab({ classes, eyebrow = "Kepala Program · read-onl
       const { data: s } = await supabase.from("students").select("id,name,class_id").in("class_id", classIds).order("name");
       setStudents(s || []);
       if (s && s.length) {
-        const { data: r } = await supabase.from("homeroom_attendance").select("student_id,status").eq("date", date).in("student_id", s.map((x) => x.id));
+        const { data: r } = await inSemester(supabase.from("homeroom_attendance").select("student_id,status")).eq("date", date).in("student_id", s.map((x) => x.id));
         setRecords(r || []);
       } else setRecords([]);
       setLoading(false);
@@ -517,7 +517,7 @@ function RekapTotalAbsensiTab({ classes, jurusanName }) {
       setStudents(s || []);
       if (s && s.length) {
         const { data: r } = await fetchAllRows(() =>
-          supabase.from("homeroom_attendance").select("student_id,status,date")
+          inSemester(supabase.from("homeroom_attendance").select("student_id,status,date"))
             .gte("date", startDate).lte("date", endDate).in("student_id", s.map((x) => x.id))
         );
         setRecords(r || []);

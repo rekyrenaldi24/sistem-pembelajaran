@@ -8,8 +8,24 @@ import SiswaApp from "./SiswaApp.jsx";
 import KepalaProgramApp from "./KepalaProgramApp.jsx";
 import AdminApp from "./AdminApp.jsx";
 import BiodataFormPublic from "./BiodataFormPublic.jsx";
-import { NAVY, NAVY2, ORANGE, BG, MUTED } from "./shared.jsx";
+import { NAVY, NAVY2, ORANGE, BG, MUTED, setCurrentSemesterId } from "./shared.jsx";
 import { Loader2, LogOut, Clock, GraduationCap, Users2, BarChart3, ShieldCheck } from "lucide-react";
+
+// Bilah kecil di atas aplikasi: memilih semester yang dibuka. Semester
+// lama (arsip) tetap bisa dibuka dan dilihat kapan saja.
+function SemesterBar({ semesters, viewSemId, activeId, onChange }) {
+  const isArchive = viewSemId !== activeId;
+  return (
+    <div className="px-4 py-1.5 flex items-center gap-2 flex-wrap text-xs" style={{ background: isArchive ? "#FFF4EE" : "#EEF0F3", color: isArchive ? "#9A4A22" : MUTED }}>
+      <span className="font-bold">Semester</span>
+      <select value={viewSemId || ""} onChange={(e) => onChange(e.target.value)} disabled={semesters.length < 2}
+        className="text-xs font-semibold px-2 py-1 rounded-md border-0" style={{ background: "white", color: NAVY }}>
+        {semesters.map((x) => <option key={x.id} value={x.id}>{x.name}{x.is_active ? " (aktif)" : " — arsip"}</option>)}
+      </select>
+      {isArchive && <span>Anda membuka arsip semester lama. Perubahan yang disimpan masuk ke semester ini.</span>}
+    </div>
+  );
+}
 
 export default function App() {
   const [session, setSession] = useState(undefined); // undefined = belum tahu, null = belum login
@@ -35,6 +51,21 @@ export default function App() {
   }, [session]);
 
   useEffect(() => { setActiveRole(null); }, [session?.user?.id]);
+
+  // Daftar semester (kalau tabelnya sudah ada). viewSemId = semester yang sedang dibuka.
+  const [semesters, setSemesters] = useState([]);
+  const [viewSemId, setViewSemId] = useState(null);
+  const loadSemesters = async (switchToActive = false) => {
+    const { data, error } = await supabase.from("semesters").select("*").order("created_at", { ascending: false });
+    if (error || !data || data.length === 0) { setSemesters([]); setViewSemId(null); return; }
+    setSemesters(data);
+    const act = data.find((x) => x.is_active) || data[0];
+    setViewSemId((prev) => (switchToActive || !prev || !data.some((x) => x.id === prev) ? act.id : prev));
+  };
+  useEffect(() => {
+    if (profile?.approved) loadSemesters(true);
+    else { setSemesters([]); setViewSemId(null); }
+  }, [profile?.id, profile?.approved]); // eslint-disable-line
 
   // Halaman formulir biodata untuk SISWA (tanpa login) — kalau URL-nya
   // ada ?isi_biodata=<id kelas>, langsung tampilkan formulir itu saja,
@@ -147,9 +178,26 @@ export default function App() {
   const onSwitchRole = canSwitchRole ? () => setActiveRole(null) : undefined;
   const onLogout = () => supabase.auth.signOut();
 
-  if (role === "admin") return <AdminApp profile={profile} onLogout={onLogout} onSwitchRole={onSwitchRole} />;
-  if (role === "guru") return <GuruApp profile={profile} onLogout={onLogout} onSwitchRole={onSwitchRole} />;
-  if (role === "wali_kelas") return <WaliKelasApp profile={profile} onLogout={onLogout} onSwitchRole={onSwitchRole} />;
-  if (role === "siswa") return <SiswaApp profile={profile} onLogout={onLogout} onSwitchRole={onSwitchRole} />;
-  return <KepalaProgramApp profile={profile} onLogout={onLogout} onSwitchRole={onSwitchRole} />;
+  // Semester yang dibuka. Sekretaris kelas selalu di semester aktif.
+  const activeSem = semesters.find((x) => x.is_active);
+  const viewSem = role === "siswa" ? activeSem : (semesters.find((x) => x.id === viewSemId) || activeSem);
+  setCurrentSemesterId(viewSem?.id || null);
+  // key = semester: ganti semester -> aplikasi dimuat ulang dengan data semester itu.
+  const appKey = viewSem?.id || "tanpa-semester";
+
+  const appEl =
+    role === "admin" ? <AdminApp key={appKey} profile={profile} onLogout={onLogout} onSwitchRole={onSwitchRole} semesters={semesters} onSemestersChanged={() => loadSemesters(true)} /> :
+    role === "guru" ? <GuruApp key={appKey} profile={profile} onLogout={onLogout} onSwitchRole={onSwitchRole} /> :
+    role === "wali_kelas" ? <WaliKelasApp key={appKey} profile={profile} onLogout={onLogout} onSwitchRole={onSwitchRole} /> :
+    role === "siswa" ? <SiswaApp key={appKey} profile={profile} onLogout={onLogout} onSwitchRole={onSwitchRole} /> :
+    <KepalaProgramApp key={appKey} profile={profile} onLogout={onLogout} onSwitchRole={onSwitchRole} />;
+
+  return (
+    <>
+      {role !== "siswa" && semesters.length > 0 && (
+        <SemesterBar semesters={semesters} viewSemId={viewSem?.id} activeId={activeSem?.id} onChange={setViewSemId} />
+      )}
+      {appEl}
+    </>
+  );
 }

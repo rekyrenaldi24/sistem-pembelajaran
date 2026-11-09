@@ -4,7 +4,7 @@ import {
   NAVY, NAVY2, ORANGE, BG, INK, MUTED, GREEN, RED,
   ATT_STATUSES, POINT_CATEGORIES, todayStr, gradeLetter,
   computeFinalScore, exportToExcel, downloadStudentTemplate, parseStudentsExcel,
-  PageHeader, Card, EmptyState, ClassPicker, Toast, OfflineBanner, useOfflineStatus, fetchAllRows, TingkatFilter, classTingkatKey, GenderCounts, countGender, useGenderCounts, genderCountsFor, GenderSelect, setStudentGender,
+  PageHeader, Card, EmptyState, ClassPicker, Toast, OfflineBanner, useOfflineStatus, fetchAllRows, TingkatFilter, classTingkatKey, GenderCounts, countGender, useGenderCounts, genderCountsFor, GenderSelect, setStudentGender, inSemester, semRow, semConflict,
 } from "./shared.jsx";
 import { offlineWrite, genId } from "./offlineSync.js";
 import {
@@ -130,7 +130,7 @@ function AbsensiTab({ profile, classes, activeClassId, setActiveClassId, student
   useEffect(() => {
     if (!activeClassId) return;
     setLoading(true);
-    supabase.from("attendance").select("student_id,status")
+    inSemester(supabase.from("attendance").select("student_id,status"))
       .eq("guru_id", profile.id).eq("subject", profile.subject).eq("date", date)
       .in("student_id", students.map((s) => s.id).length ? students.map((s) => s.id) : ["00000000-0000-0000-0000-000000000000"])
       .then(({ data }) => {
@@ -155,7 +155,7 @@ function AbsensiTab({ profile, classes, activeClassId, setActiveClassId, student
     setRecord((r) => ({ ...r, [studentId]: status }));
     const { error, offline } = await offlineWrite(
       "attendance", "upsert",
-      { student_id: studentId, guru_id: profile.id, subject: profile.subject, date, status },
+      { student_id: studentId, guru_id: profile.id, subject: profile.subject, date, status, ...semRow() },
       { onConflict: "student_id,guru_id,subject,date" }
     );
     if (error) notify("Gagal menyimpan: " + error.message);
@@ -163,7 +163,7 @@ function AbsensiTab({ profile, classes, activeClassId, setActiveClassId, student
   };
 
   const markAll = async (status) => {
-    const rows = students.map((s) => ({ student_id: s.id, guru_id: profile.id, subject: profile.subject, date, status }));
+    const rows = students.map((s) => ({ student_id: s.id, guru_id: profile.id, subject: profile.subject, date, status, ...semRow() }));
     const { error, offline } = await offlineWrite("attendance", "upsert", rows, { onConflict: "student_id,guru_id,subject,date" });
     if (error) return notify("Gagal: " + error.message);
     const rec = {}; students.forEach((s) => { rec[s.id] = status; });
@@ -248,7 +248,7 @@ function PoinTab({ profile, classes, activeClassId, setActiveClassId, students, 
 
   const loadLog = useCallback(async () => {
     if (!students.length) { setLog([]); return; }
-    const { data } = await supabase.from("points").select("*").eq("guru_id", profile.id)
+    const { data } = await inSemester(supabase.from("points").select("*")).eq("guru_id", profile.id)
       .in("student_id", students.map((s) => s.id)).order("date", { ascending: false }).limit(50);
     setLog(data || []);
   }, [students, profile.id]);
@@ -257,7 +257,7 @@ function PoinTab({ profile, classes, activeClassId, setActiveClassId, students, 
 
   const addPoint = async () => {
     if (!studentId) return;
-    const row = { id: genId(), student_id: studentId, guru_id: profile.id, type, category, note: note.trim() || null, date: todayStr() };
+    const row = { id: genId(), student_id: studentId, guru_id: profile.id, type, category, note: note.trim() || null, date: todayStr(), ...semRow() };
     const { error, offline } = await offlineWrite("points", "insert", row);
     if (error) return notify("Gagal: " + error.message);
     setLog((l) => [row, ...l]);
@@ -409,11 +409,11 @@ async function saveTestResult({ dest, profile, studentId, testName, score, note 
   if (dest === "ujian") {
     return offlineWrite(
       "final_exam_tests", "upsert",
-      { student_id: studentId, guru_id: profile.id, subject: profile.subject, test_name: testName, score: scoreVal, note },
-      { onConflict: "student_id,guru_id,subject,test_name" }
+      { student_id: studentId, guru_id: profile.id, subject: profile.subject, test_name: testName, score: scoreVal, note, ...semRow() },
+      { onConflict: semConflict("student_id,guru_id,subject,test_name") }
     );
   }
-  const row = { id: genId(), student_id: studentId, guru_id: profile.id, subject: profile.subject, date: todayStr(), score: scoreVal, note };
+  const row = { id: genId(), student_id: studentId, guru_id: profile.id, subject: profile.subject, date: todayStr(), score: scoreVal, note, ...semRow() };
   return offlineWrite("practice_scores", "insert", row);
 }
 
@@ -828,12 +828,12 @@ function TesBebasMode({ profile, students, notify, dest }) {
     if (!students.length) { setEntries([]); return; }
     if (dest === "ujian") {
       // Mode Ujian Akhir: hasil tes disimpan per nama tes (bukan per hari).
-      const { data } = await supabase.from("final_exam_tests").select("student_id,test_name,score")
+      const { data } = await inSemester(supabase.from("final_exam_tests").select("student_id,test_name,score"))
         .eq("guru_id", profile.id).eq("subject", profile.subject).in("student_id", students.map((s) => s.id));
       setEntries(data || []);
       return;
     }
-    const { data } = await supabase.from("practice_scores").select("*").eq("guru_id", profile.id).eq("subject", profile.subject)
+    const { data } = await inSemester(supabase.from("practice_scores").select("*")).eq("guru_id", profile.id).eq("subject", profile.subject)
       .eq("date", todayStr()).in("student_id", students.map((s) => s.id)).like("note", "Tes Bebas —%");
     setEntries(data || []);
   }, [students, profile.id, profile.subject, dest]);
@@ -886,7 +886,7 @@ function TesBebasMode({ profile, students, notify, dest }) {
       res = await offlineWrite("practice_scores", "update", { score: scoreVal, note }, { match: { id: existing.id } });
       if (!res.error) setEntries((es) => es.map((e) => (e.id === existing.id ? { ...e, score: scoreVal, note } : e)));
     } else {
-      const row = { id: genId(), student_id: studentId, guru_id: profile.id, subject: profile.subject, date: todayStr(), score: scoreVal, note };
+      const row = { id: genId(), student_id: studentId, guru_id: profile.id, subject: profile.subject, date: todayStr(), score: scoreVal, note, ...semRow() };
       res = await offlineWrite("practice_scores", "insert", row);
       if (!res.error) setEntries((es) => [row, ...es]);
     }
@@ -1027,7 +1027,7 @@ function PraktekTab({ profile, classes, activeClassId, setActiveClassId, student
 
   const loadEntries = useCallback(async () => {
     if (!students.length) { setEntries([]); return; }
-    const { data } = await supabase.from("practice_scores").select("*").eq("guru_id", profile.id).eq("subject", profile.subject)
+    const { data } = await inSemester(supabase.from("practice_scores").select("*")).eq("guru_id", profile.id).eq("subject", profile.subject)
       .in("student_id", students.map((s) => s.id)).order("date", { ascending: false }).limit(300);
     setEntries(data || []);
   }, [students, profile.id, profile.subject]);
@@ -1052,7 +1052,7 @@ function PraktekTab({ profile, classes, activeClassId, setActiveClassId, student
     }
     const row = {
       id: genId(), student_id: studentId, guru_id: profile.id, subject: profile.subject, date, score: Number(val),
-      note: noteVal,
+      note: noteVal, ...semRow(),
     };
     const { error, offline } = await offlineWrite("practice_scores", "insert", row);
     if (error) return notify("Gagal: " + error.message);
@@ -1279,8 +1279,8 @@ function UjianTab({ profile, classes, activeClassId, setActiveClassId, students,
     if (!students.length) { setScores({}); setTests([]); return; }
     const ids = students.map((s) => s.id);
     const [exam, tst] = await Promise.all([
-      supabase.from("final_exam_scores").select("*").eq("guru_id", profile.id).eq("subject", profile.subject).in("student_id", ids),
-      supabase.from("final_exam_tests").select("*").eq("guru_id", profile.id).eq("subject", profile.subject).in("student_id", ids).order("test_name"),
+      inSemester(supabase.from("final_exam_scores").select("*")).eq("guru_id", profile.id).eq("subject", profile.subject).in("student_id", ids),
+      inSemester(supabase.from("final_exam_tests").select("*")).eq("guru_id", profile.id).eq("subject", profile.subject).in("student_id", ids).order("test_name"),
     ]);
     const map = {};
     (exam.data || []).forEach((r) => { map[r.student_id] = r.score; });
@@ -1310,8 +1310,8 @@ function UjianTab({ profile, classes, activeClassId, setActiveClassId, students,
     if (v === "") return;
     const { error, offline } = await offlineWrite(
       "final_exam_scores", "upsert",
-      { student_id: studentId, guru_id: profile.id, subject: profile.subject, score: v },
-      { onConflict: "student_id,guru_id,subject" }
+      { student_id: studentId, guru_id: profile.id, subject: profile.subject, score: v, ...semRow() },
+      { onConflict: semConflict("student_id,guru_id,subject") }
     );
     if (error) notify("Gagal: " + error.message);
     else if (offline) notify("Tersimpan offline, akan disinkron otomatis.");
@@ -1404,11 +1404,11 @@ function NilaiAkhirTab({ profile, classes, activeClassId, setActiveClassId, stud
     setLoading(true);
     const ids = students.map((s) => s.id);
     const [att, prac, exam, pts, tst] = await Promise.all([
-      fetchAllRows(() => supabase.from("attendance").select("student_id,status,date").eq("guru_id", profile.id).eq("subject", profile.subject).in("student_id", ids)),
-      fetchAllRows(() => supabase.from("practice_scores").select("student_id,score").eq("guru_id", profile.id).eq("subject", profile.subject).in("student_id", ids)),
-      supabase.from("final_exam_scores").select("student_id,score").eq("guru_id", profile.id).eq("subject", profile.subject).in("student_id", ids),
-      fetchAllRows(() => supabase.from("points").select("student_id,type").eq("guru_id", profile.id).in("student_id", ids)),
-      fetchAllRows(() => supabase.from("final_exam_tests").select("student_id,score").eq("guru_id", profile.id).eq("subject", profile.subject).in("student_id", ids)),
+      fetchAllRows(() => inSemester(supabase.from("attendance").select("student_id,status,date")).eq("guru_id", profile.id).eq("subject", profile.subject).in("student_id", ids)),
+      fetchAllRows(() => inSemester(supabase.from("practice_scores").select("student_id,score")).eq("guru_id", profile.id).eq("subject", profile.subject).in("student_id", ids)),
+      inSemester(supabase.from("final_exam_scores").select("student_id,score")).eq("guru_id", profile.id).eq("subject", profile.subject).in("student_id", ids),
+      fetchAllRows(() => inSemester(supabase.from("points").select("student_id,type")).eq("guru_id", profile.id).in("student_id", ids)),
+      fetchAllRows(() => inSemester(supabase.from("final_exam_tests").select("student_id,score")).eq("guru_id", profile.id).eq("subject", profile.subject).in("student_id", ids)),
     ]);
     setAttendance(att.data || []); setPractice(prac.data || []); setPoints(pts.data || []);
     const exMap = {}; (exam.data || []).forEach((r) => { exMap[r.student_id] = r.score; });

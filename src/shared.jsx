@@ -203,6 +203,23 @@ export function classTingkatKey(c) {
 }
 const tingkatLabel = (k) => (k === "lain" ? "Lainnya" : `Kelas ${k}`);
 
+// ---- SEMESTER ----
+// Satu semester dibuka pada satu waktu (dipilih di bilah atas aplikasi).
+// Absensi, nilai harian, ujian akhir, dan poin selalu dibaca & ditulis
+// di semester yang sedang dibuka. Tabungan, biodata, dan catatan tidak
+// dibagi per semester. Kalau tabel semester belum ada (SQL belum
+// dijalankan), semuanya berjalan seperti biasa tanpa pembatasan.
+let _semId = null;
+export function setCurrentSemesterId(id) { _semId = id || null; }
+export const currentSemesterId = () => _semId;
+// Untuk membaca: batasi ke semester yang sedang dibuka.
+export const inSemester = (q) => (_semId ? q.eq("semester_id", _semId) : q);
+// Untuk menulis: tambahkan ke baris yang disimpan, mis. { ...baris, ...semRow() }.
+export const semRow = () => (_semId ? { semester_id: _semId } : {});
+// Untuk upsert: kunci "konflik" ikut membawa semester_id supaya nilai
+// semester lama tidak tertimpa semester baru.
+export const semConflict = (cols) => (_semId ? cols + ",semester_id" : cols);
+
 // ---- Jumlah siswa laki-laki / perempuan ----
 export function countGender(list) {
   let L = 0, P = 0, none = 0;

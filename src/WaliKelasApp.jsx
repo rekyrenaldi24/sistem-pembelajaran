@@ -3,7 +3,7 @@ import { supabase, createTempAuthClient } from "./supabaseClient.js";
 import {
   NAVY, NAVY2, ORANGE, BG, INK, MUTED, GREEN, RED, AMBER,
   ATT_STATUSES, todayStr, exportToExcel, downloadStudentTemplate, parseStudentsExcel, sha256Hex,
-  PageHeader, Card, EmptyState, ClassPicker, Toast, OfflineBanner, useOfflineStatus, fetchAllRows, GenderSelect,
+  PageHeader, Card, EmptyState, ClassPicker, Toast, OfflineBanner, useOfflineStatus, fetchAllRows, GenderSelect, inSemester, semRow,
 } from "./shared.jsx";
 import { offlineWrite, genId } from "./offlineSync.js";
 import {
@@ -130,7 +130,7 @@ export function AbsensiTab({ profile, classes, activeClassId, setActiveClassId, 
 
   useEffect(() => {
     if (!students.length) { setRecord({}); return; }
-    supabase.from("homeroom_attendance").select("student_id,status").eq("wali_kelas_id", owner).eq("date", date)
+    inSemester(supabase.from("homeroom_attendance").select("student_id,status")).eq("wali_kelas_id", owner).eq("date", date)
       .in("student_id", students.map((s) => s.id))
       .then(({ data }) => {
         const rec = {}; (data || []).forEach((r) => { rec[r.student_id] = r.status; });
@@ -142,7 +142,7 @@ export function AbsensiTab({ profile, classes, activeClassId, setActiveClassId, 
     if (!students.length) { setAllRecords([]); setLoadingRecap(false); return; }
     setLoadingRecap(true);
     const { data } = await fetchAllRows(() =>
-      supabase.from("homeroom_attendance").select("student_id,status,date").eq("wali_kelas_id", owner)
+      inSemester(supabase.from("homeroom_attendance").select("student_id,status,date")).eq("wali_kelas_id", owner)
         .in("student_id", students.map((s) => s.id))
     );
     setAllRecords(data || []);
@@ -166,7 +166,7 @@ export function AbsensiTab({ profile, classes, activeClassId, setActiveClassId, 
     setRecord((r) => ({ ...r, [studentId]: status }));
     const { error, offline } = await offlineWrite(
       "homeroom_attendance", "upsert",
-      { student_id: studentId, wali_kelas_id: owner, date, status },
+      { student_id: studentId, wali_kelas_id: owner, date, status, ...semRow() },
       { onConflict: "student_id,date" }
     );
     if (error) notify("Gagal: " + error.message);
@@ -174,7 +174,7 @@ export function AbsensiTab({ profile, classes, activeClassId, setActiveClassId, 
     loadRecap();
   };
   const markAll = async (status) => {
-    const rows = students.map((s) => ({ student_id: s.id, wali_kelas_id: owner, date, status }));
+    const rows = students.map((s) => ({ student_id: s.id, wali_kelas_id: owner, date, status, ...semRow() }));
     const { error, offline } = await offlineWrite("homeroom_attendance", "upsert", rows, { onConflict: "student_id,date" });
     if (error) return notify("Gagal: " + error.message);
     const rec = {}; students.forEach((s) => { rec[s.id] = status; });
@@ -988,7 +988,7 @@ function AbsenMapelTab({ profile, classes, activeClassId, setActiveClassId, stud
   useEffect(() => {
     if (!activeClassId || students.length === 0) { setRows([]); return; }
     setLoading(true);
-    supabase.from("attendance").select("student_id,subject,status")
+    inSemester(supabase.from("attendance").select("student_id,subject,status"))
       .eq("date", date)
       .in("student_id", students.map((s) => s.id))
       .then(({ data }) => { setRows(data || []); setLoading(false); });
