@@ -5,6 +5,7 @@ import {
   ATT_STATUSES, POINT_CATEGORIES, todayStr, gradeLetter,
   computeFinalScore, exportToExcel, downloadStudentTemplate, parseStudentsExcel,
   PageHeader, Card, EmptyState, ClassPicker, Toast, OfflineBanner, useOfflineStatus, fetchAllRows, TingkatFilter, classTingkatKey, GenderCounts, countGender, useGenderCounts, genderCountsFor, GenderSelect, setStudentGender, inSemester, semRow, semConflict, currentSemesterName,
+  usePersistedUi, useRememberedStudent, useScrollRestore,
 } from "./shared.jsx";
 import { offlineWrite, genId } from "./offlineSync.js";
 import {
@@ -33,9 +34,9 @@ const NAV = [
 ];
 
 export default function GuruApp({ profile, onLogout, onSwitchRole }) {
-  const [tab, setTab] = useState("absensi");
+  const [tab, setTab] = usePersistedUi(`r3edu_ui_guru_tab_${profile.id}`, "absensi", (v) => NAV.some((n) => n.key === v));
   const [classes, setClasses] = useState([]);
-  const [activeClassId, setActiveClassId] = useState("");
+  const [activeClassId, setActiveClassId] = usePersistedUi(`r3edu_ui_guru_class_${profile.id}`, "");
   const [students, setStudents] = useState([]);
   const [toast, setToast] = useState("");
 
@@ -58,6 +59,9 @@ export default function GuruApp({ profile, onLogout, onSwitchRole }) {
   }, [activeClassId]);
 
   useEffect(() => { loadStudents(); }, [loadStudents]);
+
+  // setelah HP mati / halaman dimuat ulang: kembali ke posisi gulir terakhir
+  useScrollRestore(`r3edu_ui_scroll_guru_${profile.id}_${tab}_${activeClassId}`, classes.length > 0 && students.length > 0);
 
   const activeClass = classes.find((c) => c.id === activeClassId);
 
@@ -238,13 +242,12 @@ function AbsensiTab({ profile, classes, activeClassId, setActiveClassId, student
 
 // ================= POIN & CATATAN =================
 function PoinTab({ profile, classes, activeClassId, setActiveClassId, students, notify }) {
-  const [studentId, setStudentId] = useState("");
+  const [studentId, setStudentId] = useRememberedStudent(profile, students, "poin");
   const [type, setType] = useState("plus");
   const [category, setCategory] = useState(POINT_CATEGORIES.plus[0]);
   const [note, setNote] = useState("");
   const [log, setLog] = useState([]);
 
-  useEffect(() => { setStudentId(students[0]?.id || ""); }, [students]);
 
   const loadLog = useCallback(async () => {
     if (!students.length) { setLog([]); return; }
@@ -418,8 +421,8 @@ async function saveTestResult({ dest, profile, studentId, testName, score, note 
 }
 
 function TkjiTab({ profile, classes, activeClassId, setActiveClassId, students, notify }) {
-  const [mode, setMode] = useState("tkji"); // "tkji" | "beep" | "bebas"
-  const [dest, setDest] = useState("harian"); // "harian" | "ujian"
+  const [mode, setMode] = usePersistedUi(`r3edu_ui_tes_mode_${profile.id}`, "tkji", (v) => ["tkji", "beep", "bebas"].includes(v)); // "tkji" | "beep" | "bebas"
+  const [dest, setDest] = usePersistedUi(`r3edu_ui_tes_dest_${profile.id}`, "harian", (v) => v === "harian" || v === "ujian"); // "harian" | "ujian"
   const modes = [
     { key: "tkji", label: "TKJI (Resmi)" },
     { key: "beep", label: "Beep Test (MFT)" },
@@ -461,13 +464,12 @@ function TkjiTab({ profile, classes, activeClassId, setActiveClassId, students, 
 }
 
 function TkjiMode({ profile, classes, activeClassId, setActiveClassId, students, notify, dest }) {
-  const [studentId, setStudentId] = useState("");
+  const [studentId, setStudentId] = useRememberedStudent(profile, students, "tkji");
   const [draftMap, setDraftMap] = useState({});
   const emptyForm = { lari60: "", gantung: "", situp: "", loncat: "", lariMenit: "", lariDetik: "" };
   const [form, setForm] = useState(emptyForm);
   const [sending, setSending] = useState(false);
 
-  useEffect(() => { setStudentId(students[0]?.id || ""); }, [students]);
 
   const loadDrafts = useCallback(async () => {
     if (!students.length) { setDraftMap({}); return; }
@@ -638,7 +640,7 @@ function TkjiMode({ profile, classes, activeClassId, setActiveClassId, students,
 
 // ================= BEEP TEST (MFT) =================
 function BeepTestMode({ profile, students, notify, dest }) {
-  const [studentId, setStudentId] = useState("");
+  const [studentId, setStudentId] = useRememberedStudent(profile, students, "beep");
   const [level, setLevel] = useState("");
   const [shuttle, setShuttle] = useState("");
   const [age, setAge] = useState("");
@@ -663,7 +665,6 @@ function BeepTestMode({ profile, students, notify, dest }) {
     if (on && !worstL && !bestL && !worstP && !bestP) { setWorstL(worst); setBestL(best); setWorstP(worst); setBestP(best); }
   };
 
-  useEffect(() => { setStudentId(students[0]?.id || ""); }, [students]);
   useEffect(() => { try { localStorage.setItem("r3edu_beep_worst", worst); } catch { /* abaikan */ } }, [worst]);
   useEffect(() => { try { localStorage.setItem("r3edu_beep_best", best); } catch { /* abaikan */ } }, [best]);
 
@@ -787,7 +788,7 @@ function TesBebasMode({ profile, students, notify, dest }) {
     setSplit(on);
     if (on && !worstL && !bestL && !worstP && !bestP) { setWorstL(worst); setBestL(best); setWorstP(worst); setBestP(best); }
   };
-  const [studentId, setStudentId] = useState("");
+  const [studentId, setStudentId] = useRememberedStudent(profile, students, "bebas");
   const [raw, setRaw] = useState("");
   const [manualScore, setManualScore] = useState("");
   const [sending, setSending] = useState(false);
@@ -819,7 +820,6 @@ function TesBebasMode({ profile, students, notify, dest }) {
     try { localStorage.setItem(draftKey, JSON.stringify({ testName, unit, worst, best, split, worstL, bestL, worstP, bestP })); } catch { /* abaikan */ }
   }, [draftKey, testName, unit, worst, best, split, worstL, bestL, worstP, bestP, draftLoaded]);
 
-  useEffect(() => { setStudentId(students[0]?.id || ""); }, [students]);
 
   // Muat nilai Tes Bebas hari ini (semua nama tes) supaya bisa ditandai
   // siapa yang sudah/belum diisi, dan supaya kirim ulang tidak bikin data

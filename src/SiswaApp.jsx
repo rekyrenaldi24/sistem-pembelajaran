@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { supabase } from "./supabaseClient.js";
-import { NAVY, NAVY2, BG, MUTED, Toast, OfflineBanner, useOfflineStatus } from "./shared.jsx";
+import { NAVY, NAVY2, BG, MUTED, Toast, OfflineBanner, useOfflineStatus, usePersistedUi } from "./shared.jsx";
 import { AbsensiTab, CatatanTab, TabunganTab } from "./WaliKelasApp.jsx";
 import { CalendarCheck, StickyNote, PiggyBank, LogOut, Repeat } from "lucide-react";
 
@@ -18,7 +18,7 @@ const NAV = [
 // diwakili akun ini) dan `ownerId` diarahkan ke wali kelas kelas itu, bukan
 // ke akun sekretarisnya sendiri.
 export default function SiswaApp({ profile, onLogout, onSwitchRole }) {
-  const [tab, setTab] = useState("absensi");
+  const [tab, setTab] = usePersistedUi(`r3edu_ui_siswa_tab_${profile.id}`, "absensi", (v) => NAV.some((n) => n.key === v));
   const [kelas, setKelas] = useState(null);
   const [students, setStudents] = useState([]);
   const [loading, setLoading] = useState(true);

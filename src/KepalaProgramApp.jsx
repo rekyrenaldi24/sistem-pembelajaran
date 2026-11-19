@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { supabase, createTempAuthClient } from "./supabaseClient.js";
 import {
-  NAVY, NAVY2, ORANGE, BG, INK, MUTED, ATT_STATUSES, todayStr, PageHeader, Card, EmptyState, Toast, exportToExcel, fetchAllRows, ClassPicker, TingkatFilter, classTingkatKey, GenderCounts, useGenderCounts, genderCountsFor, GenderSelect, setStudentGender, inSemester,
+  NAVY, NAVY2, ORANGE, BG, INK, MUTED, ATT_STATUSES, todayStr, PageHeader, Card, EmptyState, Toast, exportToExcel, fetchAllRows, ClassPicker, TingkatFilter, classTingkatKey, GenderCounts, useGenderCounts, genderCountsFor, GenderSelect, setStudentGender, inSemester, usePersistedUi,
 } from "./shared.jsx";
 import { CalendarCheck, PiggyBank, LogOut, Repeat, ListChecks, Plus, Trash2, FileDown, UserPlus, ArrowUpCircle, Archive, Users, Pencil } from "lucide-react";
 import TambahSiswaPanel from "./TambahSiswaPanel.jsx";
@@ -695,7 +695,7 @@ export function TabunganRekapTab({ classes, eyebrow = "Kepala Program · read-on
 }
 
 export default function KepalaProgramApp({ profile, onLogout, onSwitchRole }) {
-  const [tab, setTab] = useState("kelola_kelas");
+  const [tab, setTab] = usePersistedUi(`r3edu_ui_kaprog_tab_${profile.id}`, "kelola_kelas", (v) => NAV.some((n) => n.key === v));
   const [classes, setClasses] = useState([]);
   const [jurusanName, setJurusanName] = useState("");
   const [loading, setLoading] = useState(true);

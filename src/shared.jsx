@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import * as XLSX from "xlsx";
 import { supabase } from "./supabaseClient.js";
 import { subscribePending, initAutoSync, syncNow } from "./offlineSync.js";
@@ -202,6 +202,103 @@ export function classTingkatKey(c) {
   return t === null ? "lain" : String(t);
 }
 const tingkatLabel = (k) => (k === "lain" ? "Lainnya" : `Kelas ${k}`);
+
+// ---- POSISI TERAKHIR (supaya tidak balik ke beranda) ----
+// Kalau layar HP mati / browser membuang halaman lalu dimuat ulang, aplikasi
+// kembali ke posisi terakhir: peran, menu, kelas, siswa yang sedang diisi,
+// dan posisi gulir. Hanya berlaku 12 jam sejak terakhir dipakai, jadi
+// besok pagi aplikasi mulai dari awal lagi. Hanya disimpan di HP itu sendiri.
+const UI_STATE_TTL = 12 * 60 * 60 * 1000;
+export function loadUiState(key) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const o = JSON.parse(raw);
+    if (!o || !o.t || Date.now() - o.t > UI_STATE_TTL) return null;
+    return o.v === undefined ? null : o.v;
+  } catch { return null; }
+}
+export function saveUiState(key, v) {
+  try { localStorage.setItem(key, JSON.stringify({ v, t: Date.now() })); } catch { /* abaikan */ }
+}
+export function clearUiState(key) {
+  try { localStorage.removeItem(key); } catch { /* abaikan */ }
+}
+
+// Seperti useState, tapi nilainya diingat. validate (opsional) menolak
+// nilai lama yang sudah tidak berlaku (mis. menu yang sudah dihapus).
+export function usePersistedUi(key, initial, validate) {
+  const [val, setVal] = useState(() => {
+    const v = key ? loadUiState(key) : null;
+    if (v === null || v === undefined) return initial;
+    if (validate && !validate(v)) return initial;
+    return v;
+  });
+  const ref = useRef(val);
+  ref.current = val;
+  useEffect(() => { if (key) saveUiState(key, val); }, [key, val]);
+  // perbarui "waktu terakhir dipakai" saat layar mati / halaman disembunyikan
+  useEffect(() => {
+    if (!key) return undefined;
+    const h = () => { if (document.visibilityState === "hidden") saveUiState(key, ref.current); };
+    document.addEventListener("visibilitychange", h);
+    window.addEventListener("pagehide", h);
+    return () => { document.removeEventListener("visibilitychange", h); window.removeEventListener("pagehide", h); };
+  }, [key]);
+  return [val, setVal];
+}
+
+// Siswa yang sedang diisi nilainya diingat per kelas, supaya setelah halaman
+// dimuat ulang tidak kembali ke siswa pertama. scope = nama layar (poin, tkji, ...).
+export function useRememberedStudent(profile, students, scope) {
+  const classId = students[0]?.class_id || "";
+  const key = classId ? `r3edu_ui_student_${scope}_${profile.id}_${classId}` : null;
+  const [studentId, setStudentId] = useState("");
+  useEffect(() => {
+    if (!students.length) { setStudentId(""); return; }
+    const saved = key ? loadUiState(key) : null;
+    setStudentId(saved && students.some((x) => x.id === saved) ? saved : students[0].id);
+  }, [students]); // eslint-disable-line
+  useEffect(() => {
+    if (key && studentId && students.some((x) => x.id === studentId)) saveUiState(key, studentId);
+  }, [key, studentId]); // eslint-disable-line
+  return [studentId, setStudentId];
+}
+
+// Mengembalikan posisi gulir halaman sekali saja, setelah datanya selesai dimuat (ready).
+export function useScrollRestore(key, ready) {
+  const done = useRef(false);
+  useEffect(() => {
+    if (!key) return undefined;
+    let timer = null;
+    const save = () => saveUiState(key, Math.round(window.scrollY));
+    const onScroll = () => { if (timer) return; timer = setTimeout(() => { timer = null; save(); }, 400); };
+    const onHide = () => { if (document.visibilityState === "hidden") save(); };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    document.addEventListener("visibilitychange", onHide);
+    window.addEventListener("pagehide", save);
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      document.removeEventListener("visibilitychange", onHide);
+      window.removeEventListener("pagehide", save);
+      if (timer) clearTimeout(timer);
+    };
+  }, [key]);
+  useEffect(() => {
+    if (done.current || !ready || !key) return undefined;
+    done.current = true;
+    const y = loadUiState(key);
+    if (typeof y !== "number" || y <= 0) return undefined;
+    // isi halaman kadang masih bertambah panjang, jadi dicoba beberapa kali
+    let tries = 0;
+    const t = setInterval(() => {
+      window.scrollTo(0, y);
+      tries += 1;
+      if (Math.abs(window.scrollY - y) < 4 || tries >= 8) clearInterval(t);
+    }, 250);
+    return () => clearInterval(t);
+  }, [ready, key]);
+}
 
 // ---- SEMESTER ----
 // Satu semester dibuka pada satu waktu (dipilih di bilah atas aplikasi).

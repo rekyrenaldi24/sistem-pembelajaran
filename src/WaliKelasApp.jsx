@@ -4,6 +4,7 @@ import {
   NAVY, NAVY2, ORANGE, BG, INK, MUTED, GREEN, RED, AMBER,
   ATT_STATUSES, todayStr, exportToExcel, downloadStudentTemplate, parseStudentsExcel, sha256Hex,
   PageHeader, Card, EmptyState, ClassPicker, Toast, OfflineBanner, useOfflineStatus, fetchAllRows, GenderSelect, inSemester, semRow,
+  usePersistedUi, useScrollRestore,
 } from "./shared.jsx";
 import { offlineWrite, genId } from "./offlineSync.js";
 import {
@@ -25,9 +26,9 @@ const NAV = [
 const SAVING_CATEGORIES = ["Tabungan Rutin", "Tabungan Wisata", "Tabungan Perpisahan", "Lainnya"];
 
 export default function WaliKelasApp({ profile, onLogout, onSwitchRole }) {
-  const [tab, setTab] = useState("absensi");
+  const [tab, setTab] = usePersistedUi(`r3edu_ui_wali_tab_${profile.id}`, "absensi", (v) => NAV.some((n) => n.key === v));
   const [classes, setClasses] = useState([]);
-  const [activeClassId, setActiveClassId] = useState("");
+  const [activeClassId, setActiveClassId] = usePersistedUi(`r3edu_ui_wali_class_${profile.id}`, "");
   const [students, setStudents] = useState([]);
   const [toast, setToast] = useState("");
 
@@ -37,7 +38,7 @@ export default function WaliKelasApp({ profile, onLogout, onSwitchRole }) {
   const loadClasses = useCallback(async () => {
     const { data } = await supabase.from("classes").select("*").eq("archived", false).order("name");
     setClasses(data || []);
-    const stillExists = data?.some((c) => c.id === activeClassId);
+    const stillExists = data?.some((c) => c.id === activeClassId && c.owner_id === profile.id);
     if (!stillExists) {
       // otomatis pilih kelas yang wali_kelas_id-nya adalah dirinya, kalau ada
       const mine = data?.find((c) => c.wali_kelas_id === profile.id);
@@ -52,6 +53,8 @@ export default function WaliKelasApp({ profile, onLogout, onSwitchRole }) {
     supabase.from("students").select("*").eq("class_id", activeClassId).order("name")
       .then(({ data }) => setStudents(data || []));
   }, [activeClassId]);
+
+  useScrollRestore(`r3edu_ui_scroll_wali_${profile.id}_${tab}_${activeClassId}`, classes.length > 0 && students.length > 0);
 
   const activeClass = classes.find((c) => c.id === activeClassId);
   // Wali kelas cuma boleh LIHAT & KELOLA kelas yang sudah DITUGASKAN kepadanya

@@ -8,7 +8,7 @@ import SiswaApp from "./SiswaApp.jsx";
 import KepalaProgramApp from "./KepalaProgramApp.jsx";
 import AdminApp from "./AdminApp.jsx";
 import BiodataFormPublic from "./BiodataFormPublic.jsx";
-import { NAVY, NAVY2, ORANGE, BG, MUTED, setCurrentSemesterId } from "./shared.jsx";
+import { NAVY, NAVY2, ORANGE, BG, MUTED, setCurrentSemesterId, loadUiState, saveUiState, clearUiState } from "./shared.jsx";
 import { Loader2, LogOut, Clock, GraduationCap, Users2, BarChart3, ShieldCheck } from "lucide-react";
 
 // Bilah kecil di atas aplikasi: memilih semester yang dibuka. Semester
@@ -52,18 +52,44 @@ export default function App() {
 
   useEffect(() => { setActiveRole(null); }, [session?.user?.id]);
 
+  // Peran terakhir diingat: setelah HP mati lalu hidup, langsung kembali ke
+  // peran tadi (tidak perlu memilih peran lagi).
+  const roleKey = session?.user?.id ? `r3edu_ui_role_${session.user.id}` : null;
+  useEffect(() => {
+    if (!profile?.id || !roleKey) return;
+    const saved = loadUiState(roleKey);
+    if (saved) setActiveRole((cur) => cur || saved);
+  }, [profile?.id]); // eslint-disable-line
+  useEffect(() => {
+    if (!roleKey || !activeRole) return undefined;
+    saveUiState(roleKey, activeRole);
+    const h = () => { if (document.visibilityState === "hidden") saveUiState(roleKey, activeRole); };
+    document.addEventListener("visibilitychange", h);
+    window.addEventListener("pagehide", h);
+    return () => { document.removeEventListener("visibilitychange", h); window.removeEventListener("pagehide", h); };
+  }, [roleKey, activeRole]);
+
   // Daftar semester (kalau tabelnya sudah ada). viewSemId = semester yang sedang dibuka.
   const [semesters, setSemesters] = useState([]);
   const [viewSemId, setViewSemId] = useState(null);
+  const [semReady, setSemReady] = useState(false);
+  const semKey = profile?.id ? `r3edu_ui_sem_${profile.id}` : null;
   const loadSemesters = async (switchToActive = false) => {
     const { data, error } = await supabase.from("semesters").select("*").order("created_at", { ascending: false });
-    if (error || !data || data.length === 0) { setSemesters([]); setViewSemId(null); return; }
+    if (error || !data || data.length === 0) { setSemesters([]); setViewSemId(null); setSemReady(true); return; }
     setSemesters(data);
     const act = data.find((x) => x.is_active) || data[0];
-    setViewSemId((prev) => (switchToActive || !prev || !data.some((x) => x.id === prev) ? act.id : prev));
+    setViewSemId((prev) => {
+      if (switchToActive) return act.id;
+      if (prev && data.some((x) => x.id === prev)) return prev;
+      const saved = semKey ? loadUiState(semKey) : null;
+      return saved && data.some((x) => x.id === saved) ? saved : act.id;
+    });
+    setSemReady(true);
   };
+  useEffect(() => { if (semKey && viewSemId) saveUiState(semKey, viewSemId); }, [semKey, viewSemId]);
   useEffect(() => {
-    if (profile?.approved) loadSemesters(true);
+    if (profile?.approved) { setSemReady(false); loadSemesters(false); }
     else { setSemesters([]); setViewSemId(null); }
   }, [profile?.id, profile?.approved]); // eslint-disable-line
 
@@ -149,7 +175,10 @@ export default function App() {
     );
   }
 
-  if (availableRoles.length > 1 && !activeRole) {
+  // peran yang tersimpan hanya dipakai kalau akun ini memang masih punya peran itu
+  const roleValid = availableRoles.some((r) => r.key === activeRole) ? activeRole : null;
+
+  if (availableRoles.length > 1 && !roleValid) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center gap-6 text-center px-6" style={{ background: NAVY }}>
         <div>
@@ -173,10 +202,19 @@ export default function App() {
     );
   }
 
-  const role = availableRoles.length > 1 ? activeRole : availableRoles[0].key;
+  const role = availableRoles.length > 1 ? roleValid : availableRoles[0].key;
   const canSwitchRole = availableRoles.length > 1;
-  const onSwitchRole = canSwitchRole ? () => setActiveRole(null) : undefined;
-  const onLogout = () => supabase.auth.signOut();
+  const onSwitchRole = canSwitchRole ? () => { if (roleKey) clearUiState(roleKey); setActiveRole(null); } : undefined;
+  const onLogout = () => { if (roleKey) clearUiState(roleKey); supabase.auth.signOut(); };
+
+  // tunggu daftar semester siap dulu, supaya data tidak sempat terbaca tanpa batas semester
+  if (!semReady) {
+    return (
+      <div className="min-h-screen flex items-center justify-center" style={{ background: BG }}>
+        <Loader2 className="animate-spin" size={22} color={NAVY} />
+      </div>
+    );
+  }
 
   // Semester yang dibuka. Sekretaris kelas selalu di semester aktif.
   const activeSem = semesters.find((x) => x.is_active);

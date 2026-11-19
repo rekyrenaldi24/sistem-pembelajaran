@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { supabase } from "./supabaseClient.js";
 import {
   NAVY, NAVY2, ORANGE, BG, INK, MUTED, GREEN, RED, AMBER, todayStr,
-  PageHeader, Card, EmptyState, Toast, fetchAllRows, ClassPicker, TingkatFilter, classTingkatKey, GenderCounts, useGenderCounts, genderCountsFor, GenderSelect, setStudentGender, inSemester,
+  PageHeader, Card, EmptyState, Toast, fetchAllRows, ClassPicker, TingkatFilter, classTingkatKey, GenderCounts, useGenderCounts, genderCountsFor, GenderSelect, setStudentGender, inSemester, usePersistedUi,
 } from "./shared.jsx";
 import TambahSiswaPanel from "./TambahSiswaPanel.jsx";
 import { AbsensiRekapTab, TabunganRekapTab } from "./KepalaProgramApp.jsx";
@@ -629,7 +629,7 @@ function AktivitasTab() {
 
 // ================= KERANGKA UTAMA =================
 export default function AdminApp({ profile, onLogout, onSwitchRole, semesters = [], onSemestersChanged }) {
-  const [tab, setTab] = useState("ringkasan");
+  const [tab, setTab] = usePersistedUi(`r3edu_ui_admin_tab_${profile.id}`, "ringkasan", (v) => NAV.some((n) => n.key === v));
   const [jurusan, setJurusan] = useState([]);
   const [classes, setClasses] = useState([]);
   const [loading, setLoading] = useState(true);
