@@ -4,7 +4,7 @@ import {
   NAVY, NAVY2, ORANGE, BG, INK, MUTED, GREEN, RED,
   ATT_STATUSES, POINT_CATEGORIES, todayStr, gradeLetter,
   computeFinalScore, exportToExcel, downloadStudentTemplate, parseStudentsExcel,
-  PageHeader, Card, EmptyState, ClassPicker, Toast, OfflineBanner, useOfflineStatus, fetchAllRows, TingkatFilter, classTingkatKey, GenderCounts, countGender, useGenderCounts, genderCountsFor, GenderSelect, setStudentGender, inSemester, semRow, semConflict,
+  PageHeader, Card, EmptyState, ClassPicker, Toast, OfflineBanner, useOfflineStatus, fetchAllRows, TingkatFilter, classTingkatKey, GenderCounts, countGender, useGenderCounts, genderCountsFor, GenderSelect, setStudentGender, inSemester, semRow, semConflict, currentSemesterName,
 } from "./shared.jsx";
 import { offlineWrite, genId } from "./offlineSync.js";
 import {
@@ -1304,6 +1304,61 @@ function UjianTab({ profile, classes, activeClassId, setActiveClassId, students,
     await offlineWrite("final_exam_tests", "delete", null, { match: { id: t.id } });
   };
 
+  // Unduh Excel: nilai setiap tes per siswa + rata-ratanya (= Nilai Ujian Akhir).
+  const handleExportUjian = () => {
+    if (!students.length) return notify("Belum ada siswa di kelas ini.");
+    const cls = classes.find((c) => c.id === activeClassId);
+    const sem = currentSemesterName();
+    const round1 = (n) => Math.round(n * 10) / 10;
+    const mean = (arr) => arr.reduce((a, b) => a + b, 0) / arr.length;
+    const FIXED = ["No", "Nama", "L/P", "Jumlah Tes Diikuti", "Nilai Ujian Akhir (Rata-rata)", "Keterangan"];
+    const colOf = (n) => (FIXED.includes(n) ? `${n} (tes)` : n);
+
+    const rows = students.map((s, i) => {
+      const list = byStudent[s.id] || [];
+      const row = { No: i + 1, Nama: s.name, "L/P": s.gender || "-" };
+      testNames.forEach((n) => {
+        const t = list.find((x) => x.test_name === n);
+        row[colOf(n)] = t ? Number(t.score) : "";
+      });
+      const manual = scores[s.id];
+      let nilai = "";
+      let ket = "Belum ada nilai";
+      if (list.length) { nilai = avgOf(list); ket = `Rata-rata ${list.length} dari ${testNames.length} tes`; }
+      else if (manual !== undefined && manual !== "" && manual !== null) { nilai = Number(manual); ket = "Nilai manual"; }
+      row["Jumlah Tes Diikuti"] = list.length;
+      row["Nilai Ujian Akhir (Rata-rata)"] = nilai;
+      row.Keterangan = ket;
+      return row;
+    });
+
+    const avgRow = { No: "", Nama: "RATA-RATA KELAS", "L/P": "" };
+    testNames.forEach((n) => {
+      const vals = tests.filter((t) => t.test_name === n).map((t) => Number(t.score));
+      avgRow[colOf(n)] = vals.length ? round1(mean(vals)) : "";
+    });
+    avgRow["Jumlah Tes Diikuti"] = "";
+    const finals = rows.map((r) => r["Nilai Ujian Akhir (Rata-rata)"]).filter((v) => v !== "");
+    avgRow["Nilai Ujian Akhir (Rata-rata)"] = finals.length ? round1(mean(finals)) : "";
+    avgRow.Keterangan = "";
+    rows.push(avgRow);
+
+    const info = [
+      { Keterangan: "Mata pelajaran", Isi: profile.subject },
+      { Keterangan: "Kelas", Isi: cls?.name || "" },
+      { Keterangan: "Semester", Isi: sem || "-" },
+      { Keterangan: "Tanggal unduh", Isi: todayStr() },
+      { Keterangan: "Jumlah tes", Isi: testNames.length },
+      { Keterangan: "Daftar tes", Isi: testNames.join(", ") || "-" },
+      { Keterangan: "Cara hitung", Isi: "Nilai Ujian Akhir = rata-rata semua tes yang diikuti siswa (bobot sama). Siswa tanpa hasil tes memakai nilai manual bila ada." },
+    ];
+    const safe = (x) => String(x || "").replace(/[\\/:*?"<>|]/g, "-").trim().replace(/\s+/g, "_");
+    exportToExcel(
+      [{ name: "Ujian Akhir", rows }, { name: "Info", rows: info }],
+      `Ujian_Akhir_${safe(profile.subject)}_${safe(cls?.name)}${sem ? "_" + safe(sem) : ""}_${todayStr()}.xlsx`
+    );
+  };
+
   const updateScore = async (studentId, value) => {
     const v = value === "" ? "" : Math.max(0, Math.min(100, Number(value)));
     setScores((s) => ({ ...s, [studentId]: v }));
@@ -1332,6 +1387,12 @@ function UjianTab({ profile, classes, activeClassId, setActiveClassId, students,
             Hasilnya akan muncul di sini. Atau isi nilai manual di bawah.
           </div>
         )}
+        <div className="mt-3">
+          <button onClick={handleExportUjian} disabled={students.length === 0}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-sm font-semibold text-white" style={{ background: GREEN, opacity: students.length === 0 ? 0.5 : 1 }}>
+            <Download size={14} /> Unduh Excel Rekap Ujian Akhir
+          </button>
+        </div>
       </Card>
       <Card style={{ padding: 0 }}>
         {students.length === 0 ? <EmptyState icon={FileSpreadsheet} text="Belum ada siswa di kelas ini." /> : (

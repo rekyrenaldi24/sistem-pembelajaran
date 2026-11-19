@@ -210,7 +210,9 @@ const tingkatLabel = (k) => (k === "lain" ? "Lainnya" : `Kelas ${k}`);
 // dibagi per semester. Kalau tabel semester belum ada (SQL belum
 // dijalankan), semuanya berjalan seperti biasa tanpa pembatasan.
 let _semId = null;
-export function setCurrentSemesterId(id) { _semId = id || null; }
+let _semName = "";
+export function setCurrentSemesterId(id, name) { _semId = id || null; _semName = name || ""; }
+export const currentSemesterName = () => _semName;
 export const currentSemesterId = () => _semId;
 // Untuk membaca: batasi ke semester yang sedang dibuka.
 export const inSemester = (q) => (_semId ? q.eq("semester_id", _semId) : q);

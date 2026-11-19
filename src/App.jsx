@@ -181,7 +181,7 @@ export default function App() {
   // Semester yang dibuka. Sekretaris kelas selalu di semester aktif.
   const activeSem = semesters.find((x) => x.is_active);
   const viewSem = role === "siswa" ? activeSem : (semesters.find((x) => x.id === viewSemId) || activeSem);
-  setCurrentSemesterId(viewSem?.id || null);
+  setCurrentSemesterId(viewSem?.id || null, viewSem?.name);
   // key = semester: ganti semester -> aplikasi dimuat ulang dengan data semester itu.
   const appKey = viewSem?.id || "tanpa-semester";
 
